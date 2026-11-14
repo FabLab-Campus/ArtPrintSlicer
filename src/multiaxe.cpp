@@ -1389,7 +1389,9 @@ ResultatTranchage trancher_avec(const Strategie& strategie, const Reglages& regl
             tranchees.push_back(std::move(t));
             continue;
         }
-        t.origine = sur_plateau ? Vec3{} : partie.base;
+        // Une partie posée sur le plateau mais penchée (« tout incliné ») part,
+        // comme une branche, de son point le plus bas le long de sa direction.
+        t.origine = sur_plateau && verticale ? Vec3{} : partie.base;
         // Peau courbe : le dessus de la partie est abaissé, les couches
         // planes s'arrêtent dessous et une dernière passe suit la surface.
         std::shared_ptr<PeauCourbe> peau;
@@ -1707,6 +1709,14 @@ ResultatTranchage trancher_avec(const Strategie& strategie, const Reglages& regl
                 t.peau = peau;
                 t.couche_peau = t.couches.size();
                 t.couches.push_back(std::move(passe));
+            }
+        }
+        // « Tout incliné » : les toutes premières couches penchées ne touchent
+        // le plateau que par un coin, trop fin pour un cordon. L'impression
+        // commence à la première couche qui porte un cordon.
+        if (sur_plateau && !verticale) {
+            while (!t.couches.empty() && t.couches.front().traits.empty()) {
+                t.couches.erase(t.couches.begin());
             }
         }
         if (t.couches.empty() || t.couches.front().traits.empty()) {

@@ -1017,7 +1017,45 @@ void test_encombrement_tete() {
     }
 }
 
+// « Tout incliné » : toute la pièce en couches penchées depuis le plateau.
+void test_tout_incline() {
+    ConstructeurMaillage c;
+    essai::ajouter_cylindre(c, {0, 0, 0}, {0, 0, 30}, 10.0, 64);
+    const Maillage cylindre = c.terminer();
+    Reglages r = reglages_essai();
+    r.machine.contrat_gcode = 1;
+    r.impression.jupe_boucles = 0;
+    const ResultatTranchage droit = trancher_classique(cylindre, r, true);
+    for (const double azimut : {0.0, 90.0, 200.0}) {
+        const Strategie inclinee = strategie_inclinee(cylindre, r, 45.0, azimut);
+        VERIFIER(inclinee.parties.size() == 1 && proche(inclinee.parties[0].inclinaison, 45.0, 1e-6));
+        const ResultatTranchage tranche = trancher_strategie(inclinee, r);
+        VERIFIER_ACCEPTE(tranche.verification);
+        // Toute la pièce est imprimée : autant de filament qu'en classique, à peu de chose près.
+        VERIFIER(tranche.longueur_filament > 0.93 * droit.longueur_filament &&
+                 tranche.longueur_filament < 1.07 * droit.longueur_filament);
+        // La tête garde 45° sur toutes les extrusions.
+        double b_min = 1e9, b_max = -1e9;
+        for (const LigneLue& ligne : lire_mouvements(tranche.gcode)) {
+            if (ligne.e > 1e-9) {
+                b_min = std::min(b_min, std::abs(ligne.b));
+                b_max = std::max(b_max, std::abs(ligne.b));
+            }
+        }
+        VERIFIER(proche(b_min, 45.0, 0.01) && proche(b_max, 45.0, 0.01));
+    }
+    // Au ras du plateau, la tête ne penche pas plus que la limite : refus avec un message.
+    bool refuse = false;
+    try {
+        strategie_inclinee(cylindre, r, 80.0, 0.0);
+    } catch (const std::runtime_error&) {
+        refuse = true;
+    }
+    VERIFIER(refuse);
+}
+
 int main() {
+    test_tout_incline();
     test_encombrement_tete();
     test_zones_orientees();
     test_decoupe();
