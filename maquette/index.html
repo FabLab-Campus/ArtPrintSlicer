@@ -161,7 +161,7 @@
       <button id="cam-iso">3D</button><button id="cam-dessus">Dessus</button><button id="cam-face">Face</button><button id="cam-droite">Droite</button><button id="cam-cadrer" title="Recadrer sur la pièce" aria-label="Recadrer sur la pièce" data-icone="echelle"></button>
     </div>
 
-    <div class="accueil" id="accueil">
+    <div class="accueil" id="accueil" hidden>
       <strong>Aucun modèle ouvert</strong>
       <span>Ouvre un fichier STL pour le poser sur le plateau.</span>
       <button id="btn-ouvrir-2" class="bouton plein"><span>Ouvrir un modèle…</span></button>
@@ -341,26 +341,46 @@
   </section>
 </div>
 
-<div class="page page-vide" id="page-projet" hidden>
-  <div class="accueil-carte">
-    <span class="grande-icone" data-icone-24="projet"></span>
-    <strong>Projet</strong>
-    <span>Informations du projet, notes et fichiers joints.</span>
-    <span class="note-colonnes">Page à venir.</span>
-  </div>
+<div class="page page-projet" id="page-projet" hidden>
+  <section class="projet-courant" aria-label="Projet en cours">
+    <header class="page-bandeau"><span>Projet en cours</span></header>
+    <div class="projet-corps" id="projet-courant"></div>
+  </section>
+  <section class="projet-bibliotheque" aria-label="Mes projets">
+    <header class="page-bandeau"><span>Mes projets</span><span class="ressort"></span>
+      <button class="bouton fin" id="projet-ouvrir-fichier">Ouvrir un fichier projet…</button>
+      <button class="bouton plein fin" id="projet-nouveau">Nouveau projet</button></header>
+    <div class="projet-filtres">
+      <span class="deroulant" data-icone="chevron-bas"><select id="projet-dossier" aria-label="Dossier"></select></span>
+      <span class="deroulant" data-icone="chevron-bas"><select id="projet-statut" aria-label="Avancement"></select></span>
+      <label class="champ-recherche" data-icone="recherche"><input id="projet-recherche" type="search" placeholder="Rechercher un projet" aria-label="Rechercher un projet"></label>
+    </div>
+    <div class="projet-liste" id="projet-liste"></div>
+  </section>
 </div>
 
 <div class="page page-calibration" id="page-calibration" hidden>
   <header class="calibration-tete">
     <div>
       <strong>Calibration</strong>
-      <span class="aide">Les mesures à faire sur la machine, et où les reporter dans le slicer.</span>
+      <span class="aide">Régler l'imprimante pas à pas, et savoir quoi faire quand une impression se passe mal.</span>
     </div>
     <span class="ressort"></span>
-    <label class="interrupteur-libelle" for="mode-developpeur" title="Accès direct à l'imprimante : déplacements et commandes G-code">Mode développeur<input type="checkbox" class="interrupteur" id="mode-developpeur"></label>
+    <label class="interrupteur-libelle" for="mode-developpeur" title="Réglages de la machine et accès direct à l'imprimante">Mode développeur<input type="checkbox" class="interrupteur" id="mode-developpeur"></label>
   </header>
-  <div class="calibration-cartes" id="calibration-cartes"></div>
-  <section class="developpeur" id="developpeur" aria-label="Accès direct à l'imprimante" hidden>
+  <div class="calibration-guides">
+    <section aria-label="Régler l'imprimante">
+      <h3>Régler l'imprimante</h3>
+      <div class="guides" id="guides-reglage"></div>
+    </section>
+    <section aria-label="En cas de problème">
+      <h3>En cas de problème</h3>
+      <div class="guides" id="guides-probleme"></div>
+    </section>
+  </div>
+  <section class="developpeur" id="developpeur" aria-label="Mode développeur" hidden>
+    <header class="page-bandeau"><span>Réglages de la machine</span><span class="ressort"></span><span class="note-colonnes">Ces mesures changent directement les réglages du slicer.</span></header>
+    <div class="calibration-cartes" id="calibration-cartes"></div>
     <header class="page-bandeau"><span>Accès direct à l'imprimante</span><span class="ressort"></span><span class="note-colonnes" id="dev-etat"></span></header>
     <div class="developpeur-corps">
       <div class="dev-bloc">

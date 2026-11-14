@@ -12,6 +12,7 @@
 #include <array>
 #include <format>
 #include <fstream>
+#include <map>
 #include <optional>
 #include <vector>
 #include <cstdint>
@@ -61,6 +62,25 @@ struct Session::Etat {
     // La dernière réponse de « trancher », pour la version et la demande données.
     std::string demande_tranchee, reponse_tranchee;
     std::uint64_t version_tranchee = 0;
+
+    // Les pièces des autres plateaux, rangées telles quelles (voir « choisir_plateau »).
+    struct Piece {
+        std::optional<Maillage> modele, origine;
+        double echelle = 1.0;
+        std::array<double, 3> rotation{0.0, 0.0, 0.0};
+        std::array<double, 2> decalage{0.0, 0.0};
+        bool oriente = false;
+        std::optional<ResultatTranchage> resultat;
+        std::size_t sommets_solides = 0;
+        std::optional<std::vector<Strategie>> strategies;
+        std::optional<double> duree_classique;
+        std::string demande_tranchee, reponse_tranchee;
+        bool strategies_a_jour = false, duree_a_jour = false, reponse_a_jour = false;
+        std::uint64_t reglages = 0;  // les réglages n'avaient pas changé depuis ce numéro
+    };
+    std::map<int, Piece> rangees;
+    int plateau = 0;
+    std::uint64_t version_reglages = 0;  // change à chaque modification des réglages
 };
 
 namespace {
@@ -462,6 +482,9 @@ std::string Session::executer_sous_verrou(std::string_view demande_json) {
             if (commande == nom) {
                 ++etat.version;
             }
+        }
+        if (commande == "definir_reglages" || commande == "reglages_par_defaut" || commande == "charger_reglages") {
+            ++etat.version_reglages;
         }
         // Les façons d'imprimer le modèle ouvert, calculées une seule fois par version.
         const auto strategies_du_modele = [&]() -> const std::vector<Strategie>& {
@@ -888,7 +911,75 @@ std::string Session::executer_sous_verrou(std::string_view demande_json) {
             reponse["orientation"] = "origine";
             reponse["connecteurs_poses"] = poses;
             reponse["note"] = remarque;
+        } else if (commande == "choisir_plateau") {
+            // Passe à un autre plateau : la pièce du plateau quitté est rangée
+            // avec tout ce qui a été calculé pour elle, et celle du plateau
+            // choisi est reprise telle qu'elle était. Rien n'est relu ni recalculé.
+            const int voulu = demande.at("numero").get<int>();
+            if (voulu != etat.plateau) {
+                Etat::Piece quittee;
+                quittee.modele = std::move(etat.modele);
+                quittee.origine = std::move(etat.origine);
+                quittee.echelle = etat.echelle;
+                quittee.rotation = etat.rotation;
+                quittee.decalage = etat.decalage;
+                quittee.oriente = etat.oriente;
+                quittee.resultat = std::move(etat.resultat);
+                quittee.sommets_solides = etat.sommets_solides;
+                quittee.strategies = std::move(etat.strategies);
+                quittee.strategies_a_jour = quittee.strategies && etat.version_strategies == etat.version;
+                quittee.duree_classique = etat.duree_classique;
+                quittee.duree_a_jour = quittee.duree_classique && etat.version_duree == etat.version;
+                quittee.demande_tranchee = std::move(etat.demande_tranchee);
+                quittee.reponse_tranchee = std::move(etat.reponse_tranchee);
+                quittee.reponse_a_jour = quittee.resultat && etat.version_tranchee == etat.version;
+                quittee.reglages = etat.version_reglages;
+                etat.rangees[etat.plateau] = std::move(quittee);
+
+                Etat::Piece reprise;
+                if (const auto trouvee = etat.rangees.find(voulu); trouvee != etat.rangees.end()) {
+                    reprise = std::move(trouvee->second);
+                    etat.rangees.erase(trouvee);
+                }
+                // (Si les réglages ont changé entre-temps, ce qui avait été calculé ne vaut plus.)
+                const bool memes_reglages = reprise.reglages == etat.version_reglages;
+                ++etat.version;
+                etat.plateau = voulu;
+                etat.modele = std::move(reprise.modele);
+                etat.origine = std::move(reprise.origine);
+                etat.echelle = reprise.echelle;
+                etat.rotation = reprise.rotation;
+                etat.decalage = reprise.decalage;
+                etat.oriente = reprise.oriente;
+                etat.sommets_solides = reprise.sommets_solides;
+                etat.resultat.reset();
+                etat.strategies.reset();
+                etat.duree_classique.reset();
+                etat.demande_tranchee.clear();
+                etat.reponse_tranchee.clear();
+                if (memes_reglages) {
+                    if (reprise.strategies_a_jour) {
+                        etat.strategies = std::move(reprise.strategies);
+                        etat.version_strategies = etat.version;
+                    }
+                    if (reprise.duree_a_jour) {
+                        etat.duree_classique = reprise.duree_classique;
+                        etat.version_duree = etat.version;
+                    }
+                    if (reprise.reponse_a_jour) {
+                        etat.resultat = std::move(reprise.resultat);
+                        etat.demande_tranchee = std::move(reprise.demande_tranchee);
+                        etat.reponse_tranchee = std::move(reprise.reponse_tranchee);
+                        etat.version_tranchee = etat.version;
+                    }
+                }
+            }
+            reponse["plateau"] = etat.plateau;
+            reponse["modele_ouvert"] = static_cast<bool>(etat.modele);
         } else if (commande == "fermer_modele") {
+            // (Nouveau projet : les pièces des autres plateaux sont oubliées aussi.)
+            etat.rangees.clear();
+            etat.plateau = 0;
             etat.modele.reset();
             etat.origine.reset();
             etat.resultat.reset();

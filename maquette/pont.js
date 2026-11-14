@@ -118,6 +118,8 @@ function choisirPiece() {
 export const simulation = true;
 let projetSimule = null;
 let debutTranchage = 0;
+const piecesDesPlateaux = [];
+let plateauCourant = 0;
 
 export async function appeler(commande, parametres = {}) {
   await charger();
@@ -156,6 +158,13 @@ export async function appeler(commande, parametres = {}) {
     case 'fermer_modele':
       piece = null;
       return { ok: true };
+    case 'choisir_plateau': {
+      // Chaque plateau garde sa pièce.
+      piecesDesPlateaux[plateauCourant] = piece;
+      plateauCourant = parametres.numero;
+      piece = piecesDesPlateaux[plateauCourant] ?? null;
+      return { ok: true, plateau: plateauCourant, modele_ouvert: Boolean(piece) };
+    }
     case 'couper_modele':
       return { ok: false, erreur: 'Simulation : couper la pièce demande le vrai slicer, dans l\'application installée.' };
     case 'dialogue_ouvrir': {

@@ -5,7 +5,7 @@ import { appeler, simulation } from './pont.js';
 import { Vue3D, couleursTrajectoires } from './vue3d.js';
 import { composerRotation, rotationPourPoser, COULEURS_AXES } from './manipulateurs.js';
 import { icone } from './icones.js';
-import { ONGLETS, PARAMETRES, PROFILS, MATIERES, BOBINES_EXEMPLE, PROFIL_MACHINE } from './catalogue.js';
+import { ONGLETS, PARAMETRES, PROFILS, MATIERES, MARQUES, BOBINES_EXEMPLE, PROFIL_MACHINE } from './catalogue.js';
 import { ouvrirMenu } from './menu.js';
 import { brancherPages } from './pages.js';
 
@@ -48,6 +48,8 @@ const etat = {
   strategies: [],       // façons d'imprimer proposées pour le modèle ouvert
   strategie: 'classique',
   branches: {},         // ondulation : choix de l'utilisateur par branche (numéro de partie -> choix)
+  projetInfos: { dossier: '', statut: 'preparation', notes: '' },   // ce que la page Projet ajoute au projet
+  exporte: false,       // vrai : le G-code du tranchage en cours a été exporté
   coupes: [],           // coupes faites sur le modèle ouvert ({ hauteur, garder, pose })
   modeOndulation: 'auto', // ondulation : 'auto' (parties trouvées par le slicer), 'zones' (à la main) ou 'incline' (toute la pièce)
   incline: { inclinaison: 45, azimut: 0 },   // ondulation « tout incliné » : l'angle de la tête et le côté vers lequel elle penche
@@ -371,7 +373,7 @@ async function monterBobine(id, silencieux = false) {
 }
 
 const CHAMPS_BOBINE = [
-  ['nom', 'Nom', 'texte'], ['marque', 'Marque', 'texte'], ['matiere', 'Matière', 'matiere'], ['couleur', 'Couleur', 'couleur'],
+  ['nom', 'Nom', 'texte'], ['marque', 'Marque', 'marque'], ['matiere', 'Matière', 'matiere'], ['couleur', 'Couleur', 'couleur'],
   [null],
   ['diametre', 'Diamètre', 'nombre', 'mm', 0.5, 5], ['densite', 'Densité', 'nombre', 'g/cm³', 0.5, 5],
   ['temp_buse', 'Température de la buse', 'nombre', '°C', 150, 500], ['temp_plateau', 'Température du plateau', 'nombre', '°C', 0, 200],
@@ -431,15 +433,39 @@ function ouvrirBibliotheque(depart = etat.montee) {
       nom.htmlFor = 'fiche-' + cle;
       let champ;
       if (type === 'matiere') {
+        // Les matières, rangées par famille.
         champ = el('select', 'champ');
-        for (const m of Object.keys(MATIERES)) champ.add(new Option(m, m, false, m === brouillon.matiere));
+        const familles = [...new Set(Object.values(MATIERES).map((m) => m.famille))];
+        for (const famille of familles) {
+          const groupe = el('optgroup');
+          groupe.label = famille;
+          for (const [nom, m] of Object.entries(MATIERES)) {
+            if (m.famille === famille) groupe.append(new Option(nom, nom, false, nom === brouillon.matiere));
+          }
+          champ.append(groupe);
+        }
+        if (!MATIERES[brouillon.matiere]) champ.add(new Option(brouillon.matiere, brouillon.matiere, false, true));
         champ.addEventListener('change', () => {
-          // Changer de matière propose ses valeurs habituelles.
+          // Changer de matière propose ses réglages de départ habituels.
           const m = MATIERES[champ.value];
           Object.assign(brouillon, { matiere: champ.value, temp_buse: m.temp_buse, temp_plateau: m.temp_plateau,
             densite: m.densite, ventilation: m.ventilation, retraction: m.retraction });
           dessiner();
         });
+      } else if (type === 'marque') {
+        // Une marque de la liste, ou n'importe quelle autre tapée à la main.
+        champ = el('input', 'champ texte');
+        champ.type = 'text';
+        champ.value = brouillon[cle];
+        champ.setAttribute('list', 'liste-marques');
+        champ.placeholder = 'Choisir ou taper une marque';
+        champ.addEventListener('input', () => { brouillon[cle] = champ.value; });
+        if (!$('liste-marques')) {
+          const liste = el('datalist');
+          liste.id = 'liste-marques';
+          for (const marque of MARQUES) liste.append(new Option(marque, marque));
+          document.body.append(liste);
+        }
       } else if (type === 'bool') {
         champ = el('input');
         champ.type = 'checkbox';
@@ -456,6 +482,15 @@ function ouvrirBibliotheque(depart = etat.montee) {
       paire.append(nom, champ);
       if (type === 'nombre') paire.append(el('span', 'unite', unite));
       formulaire.append(paire);
+      if (type === 'matiere' && MATIERES[brouillon.matiere]) {
+        // Ce qu'il faut savoir sur cette matière, sous son nom.
+        const m = MATIERES[brouillon.matiere];
+        const conseils = el('p', 'conseils-matiere', [m.note, `Vitesse conseillée : ${m.vitesse} mm/s au plus.`, `Séchage : ${m.sechage}.`,
+          m.enceinte ? 'Imprimante fermée conseillée.' : '', m.buse_renforcee ? 'Buse en acier trempé conseillée (matière abrasive).' : '']
+          .filter(Boolean).join(' '));
+        conseils.id = 'fiche-conseils';
+        formulaire.append(conseils);
+      }
     }
     const boutons = el('div', 'boutons');
     const enregistrer = el('button', 'bouton plein', 'Enregistrer');
@@ -665,7 +700,15 @@ function afficherProcede() {
     zone.append(rangParametre(p, Boolean(recherche)));
   }
   const caches = recherche ? 0 : PARAMETRES.filter((p) => p.onglet === etat.onglet && p.avance && !etat.avance && !estModifie(p)).length;
-  if (caches) zone.append(el('div', 'legende-prevu', `${caches} paramètre(s) avancé(s) masqué(s) : active « Avancé ».`));
+  if (caches || etat.avance) {
+    // La note du bas porte son bouton : on n'a pas à chercher l'interrupteur « Avancé » en haut de la section.
+    const note = el('div', 'legende-prevu note-avance', caches ? `${caches} paramètre(s) avancé(s) masqué(s).` : 'Tous les paramètres avancés sont affichés.');
+    const bouton = el('button', 'bouton fin', etat.avance ? 'Masquer les paramètres avancés' : 'Afficher les paramètres avancés');
+    bouton.id = 'btn-avance-bas';
+    bouton.addEventListener('click', () => { etat.avance = !etat.avance; $('mode-avance').checked = etat.avance; afficherProcede(); });
+    note.append(bouton);
+    zone.append(note);
+  }
   zone.scrollTop = defilement;
 }
 
@@ -723,6 +766,7 @@ function viderReleves() {
 
 function perimer() {
   const avait = Boolean(etat.resultat);
+  etat.exporte = false;
   etat.resultat = null;
   vue3d.viderApercu();
   $('btn-exporter').disabled = true;
@@ -739,7 +783,10 @@ async function ouvrirModele() {
   const choix = await demander('dialogue_ouvrir', { titre: 'Ouvrir un modèle',
     filtres: [['Modèles STL', '*.stl'], ['Tous les fichiers', '*.*']] });
   if (!choix || !choix.chemin) return;
-  await chargerModele(choix.chemin);
+  if (!(await chargerModele(choix.chemin))) return;
+  // Un nouveau modèle commence un nouveau projet, pas encore enregistré.
+  etat.cheminProjet = null;
+  etat.projetInfos = { dossier: '', statut: 'preparation', notes: '' };
 }
 
 // Charge un fichier dans le plateau courant.
@@ -1116,21 +1163,29 @@ async function fermerModele() {
   etat.rotation = [0, 0, 0];
   etat.decalage = [0, 0];
   etat.plateaux = [{}];
+  memoirePlateaux.length = 0;
   etat.plateau = 0;
   vue3d.afficherModele([]);
   $('r-modele').textContent = 'Aucun modèle';
   $('r-dimensions').textContent = '';
   $('titre-document').textContent = 'Sans titre';
   $('btn-trancher').disabled = true;
-  $('accueil').hidden = false;
   afficherStrategies();
   perimer();
   afficherPlateaux();
 }
 
+// La bibliothèque des projets : ceux qu'on a enregistrés ou ouverts, avec de quoi les retrouver.
+function noterDansLaBibliotheque(chemin) {
+  const fiche = { chemin, nom: chemin.split(/[\\/]/).pop().replace(/\.artprint$/i, ''), modele: etat.modele?.nom ?? '',
+    date: new Date().toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }), ...etat.projetInfos };
+  memoire.ecrire('projets', [fiche, ...memoire.lire('projets', []).filter((x) => x.chemin !== chemin)].slice(0, 200));
+}
+
 async function nouveauProjet() {
   await fermerModele();
   etat.cheminProjet = null;
+  etat.projetInfos = { dossier: '', statut: 'preparation', notes: '' };
   oublierHistorique();
   dire('Nouveau projet : le plateau est vide. Les réglages sont gardés.', { info: true });
 }
@@ -1141,14 +1196,17 @@ async function enregistrerProjet() {
   const choix = await demander('dialogue_enregistrer', { titre: 'Enregistrer le projet', nom_propose: etat.cheminProjet || nom, filtres: FILTRE_PROJET });
   if (!choix || !choix.chemin) return;
   const projet = { format: 'artprint-projet', version: 1, ...instantane(), profil: etat.profil, valeurs: etat.valeurs,
-    reglages: Object.fromEntries(etat.moteur.map((r) => [r.cle, r.valeur])) };
+    reglages: Object.fromEntries(etat.moteur.map((r) => [r.cle, r.valeur])), infos: etat.projetInfos };
   if (!(await demander('enregistrer_projet', { chemin: choix.chemin, projet }))) return;
   etat.cheminProjet = choix.chemin;
+  noterDansLaBibliotheque(choix.chemin);
   dire(`Projet enregistré : ${choix.chemin}. Il garde le chemin du modèle, sa pose, les coupes, les zones et les réglages.`, { info: true });
 }
 
-async function ouvrirProjet() {
-  const choix = await demander('dialogue_ouvrir', { titre: 'Ouvrir un projet', filtres: [...FILTRE_PROJET, ['Tous les fichiers', '*.*']] });
+// « cheminConnu » : un projet de la bibliothèque, ouvert sans passer par la boîte de dialogue.
+async function ouvrirProjet(cheminConnu) {
+  const choix = typeof cheminConnu === 'string' ? { chemin: cheminConnu }
+    : await demander('dialogue_ouvrir', { titre: 'Ouvrir un projet', filtres: [...FILTRE_PROJET, ['Tous les fichiers', '*.*']] });
   if (!choix || !choix.chemin) return;
   const reponse = await demander('charger_projet', { chemin: choix.chemin });
   if (!reponse) return;
@@ -1171,7 +1229,10 @@ async function ouvrirProjet() {
     return;
   }
   etat.cheminProjet = choix.chemin;
+  etat.projetInfos = { dossier: '', statut: 'preparation', notes: '', ...(projet.infos ?? {}) };
+  noterDansLaBibliotheque(choix.chemin);
   oublierHistorique();
+  choisirVue('preparer');
   dire(`Projet ouvert : ${choix.chemin}.`, { info: true });
 }
 
@@ -1552,17 +1613,28 @@ function afficherPlateaux() {
   }));
 }
 
+// Ce que l'interface garde d'un plateau quand on le quitte, pour le retrouver tel quel.
+const memoirePlateaux = [];
+const CLES_PLATEAU = ['modele', 'chemin', 'echelle', 'orientation', 'rotation', 'decalage', 'coupes', 'strategies', 'strategie',
+  'branches', 'zones', 'modeOndulation', 'incline', 'cheminProjet'];
+
 async function choisirPlateau(numero) {
   if (numero === etat.plateau) return;
   setTimeout(oublierHistorique, 0);   // (l'historique ne suit qu'un plateau à la fois)
+  await fileMoteur;
+  if (etat.pointage) pointer(false);
+  etat.fermerPanneau?.();
+  // Le plateau quitté est rangé avec sa pièce ; le slicer range la sienne de son côté.
+  memoirePlateaux[etat.plateau] = Object.fromEntries(CLES_PLATEAU.map((cle) => [cle, etat[cle]]));
+  if (!(await demander('choisir_plateau', { numero }))) return;
   etat.plateau = numero;
-  const plateau = etat.plateaux[numero];
-  if (!plateau.chemin) {
+  const memoire = memoirePlateaux[numero];
+  generationStrategies++;   // une recherche en cours pour l'autre plateau ne concerne plus celui-ci
+  signalerCalcul(false);
+  if (!memoire?.modele) {
     // Plateau vide : on attend qu'un modèle y soit ouvert.
-    etat.modele = null;
-    etat.chemin = null;
-    etat.strategies = [];
-    etat.strategie = 'classique';
+    Object.assign(etat, { modele: null, chemin: null, strategies: [], strategie: 'classique', branches: {}, zones: [], coupes: [],
+      echelle: 1, orientation: 'origine', rotation: [0, 0, 0], decalage: [0, 0], modeOndulation: 'auto', zoneChoisie: -1, apercuZones: null });
     vue3d.afficherModele([]);
     $('r-modele').textContent = 'Aucun modèle';
     $('r-dimensions').textContent = `Plateau ${numero + 1} vide`;
@@ -1573,13 +1645,22 @@ async function choisirPlateau(numero) {
     dire(`Plateau ${numero + 1} : ouvre un modèle pour le remplir.`, { info: true });
     return;
   }
-  if (!(await chargerModele(plateau.chemin))) return;
-  const tourne = (plateau.rotation ?? [0, 0, 0]).some((v) => v !== 0) || (plateau.decalage ?? [0, 0]).some((v) => v !== 0);
-  if (plateau.echelle !== 1 || plateau.orientation !== 'origine' || tourne) {
-    const parametres = { echelle: plateau.echelle, decalage: plateau.decalage ?? [0, 0] };
-    if (plateau.orientation === 'auto') parametres.orientation = 'auto'; else parametres.rotation = plateau.rotation ?? [0, 0, 0];
-    await transformer(parametres, `Plateau ${numero + 1}.`);
-  }
+  // La pièce revient telle qu'elle était : rien n'est relu ni recalculé.
+  Object.assign(etat, memoire, { zoneChoisie: -1, apercuZones: null, resultat: null });
+  vue3d.afficherModele(etat.modele.positions, true, etat.modele.normales);
+  vue3d.rafraichirTheme();
+  const [x, y, z] = etat.modele.dimensions;
+  $('r-modele').textContent = etat.modele.nom;
+  $('r-dimensions').textContent = `${fr(x)} × ${fr(y)} × ${fr(z)} mm · ${entier(etat.modele.triangles)} triangles` +
+    (etat.echelle !== 1 ? ` · échelle ${fr(etat.echelle * 100, 0)} %` : '');
+  $('titre-document').textContent = etat.modele.nom.replace(/\.[^.]+$/, '');
+  $('btn-trancher').disabled = false;
+  if (!etat.strategies.length) chercherStrategies(0);
+  afficherStrategies();
+  montrerOndulation();
+  perimer();
+  afficherPlateaux();
+  choisirVue('preparer');
 }
 
 function outilAjouterPlateau() {
@@ -2123,6 +2204,7 @@ async function exporter() {
   if (!(await demander('enregistrer_gcode', { chemin: choix.chemin }))) return;
   const b = bobineMontee();
   const grammes = Math.round(etat.grammes || 0);
+  etat.exporte = true;
   // Le fichier est noté pour la page Imprimante > Fichiers.
   etat.exports = [{ nom: choix.chemin.split(/[\\/]/).pop(), chemin: choix.chemin, date: new Date().toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }),
     duree: duree(etat.resultat.duree_s), grammes, strategie: etat.strategie === 'couches_courbes' ? 'ondulation' : 'classique' },
@@ -2325,6 +2407,25 @@ pages = brancherPages({ etat, dire, moteur, lireNombre, bobineMontee, monterBobi
   version: () => $('version').textContent || '?',
   profilMachine: () => PROFIL_MACHINE.version,
   libelle: (cle) => etat.moteur.find((r) => r.cle === cle)?.libelle ?? cle,
+  allerA: (vue) => choisirVue(vue),
+  projet: {
+    infos: () => etat.projetInfos,
+    definirInfos: (changements) => {
+      Object.assign(etat.projetInfos, changements);
+      // (La bibliothèque suit tout de suite ; le fichier du projet, au prochain enregistrement.)
+      if (etat.cheminProjet) memoire.ecrire('projets', memoire.lire('projets', []).map((x) => (x.chemin === etat.cheminProjet ? { ...x, ...etat.projetInfos } : x)));
+    },
+    etat: () => ({ cheminProjet: etat.cheminProjet ?? null, modele: etat.modele?.nom ?? null,
+      taille: etat.modele ? `${fr(etat.modele.dimensions[0])} × ${fr(etat.modele.dimensions[1])} × ${fr(etat.modele.dimensions[2])} mm` : '',
+      strategie: etat.strategie !== 'couches_courbes' ? 'Classique (3 axes)'
+        : `Ondulation · ${{ auto: 'automatique', zones: `${etat.zones.length} zone(s)`, incline: `tout incliné à ${etat.incline.inclinaison}°` }[etat.modeOndulation]}`,
+      tranche: Boolean(etat.resultat?.verification.valide), exporte: etat.exporte }),
+    bibliotheque: () => memoire.lire('projets', []),
+    retirer: (chemin) => memoire.ecrire('projets', memoire.lire('projets', []).filter((x) => x.chemin !== chemin)),
+    enregistrer: () => enregistrerProjet(),
+    ouvrir: (chemin) => ouvrirProjet(chemin),
+    nouveau: () => nouveauProjet(),
+  },
   allerAuxParametres: () => { choisirVue('preparer'); dire('La rétraction est dans les paramètres du procédé, onglet « Autres ».', { info: true }); } });
 $('btn-fichier').addEventListener('click', menuFichier);
 $('btn-trancher-menu').addEventListener('click', menuTrancher);

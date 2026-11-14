@@ -208,15 +208,78 @@ export const PROFILS = [
 ];
 
 // Valeurs de départ proposées pour chaque matière.
+// Matières : les réglages de DÉPART habituels de chaque famille de filament.
+// Ce sont des valeurs courantes, pas celles d'un fabricant précis : chaque
+// bobine garde ses propres valeurs, à ajuster d'après l'étiquette de la
+// bobine et un essai d'impression.
+//   temp_buse, temp_plateau en °C ; densite en g/cm³ ; retraction en mm ;
+//   vitesse : vitesse d'impression conseillée au plus, en mm/s ;
+//   sechage : séchage conseillé avant d'imprimer ; enceinte : imprimante
+//   fermée conseillée ; buse_renforcee : buse en acier trempé conseillée
+//   (matière chargée, abrasive) ; note : ce qu'il faut savoir.
 export const MATIERES = {
-  PLA:  { temp_buse: 210, temp_plateau: 55, densite: 1.24, ventilation: true, retraction: 2 },
-  PETG: { temp_buse: 240, temp_plateau: 75, densite: 1.27, ventilation: true, retraction: 2.5 },
-  ABS:  { temp_buse: 250, temp_plateau: 100, densite: 1.04, ventilation: false, retraction: 2 },
-  ASA:  { temp_buse: 255, temp_plateau: 100, densite: 1.07, ventilation: false, retraction: 2 },
-  TPU:  { temp_buse: 225, temp_plateau: 45, densite: 1.21, ventilation: true, retraction: 1 },
-  PA:   { temp_buse: 270, temp_plateau: 90, densite: 1.14, ventilation: false, retraction: 2 },
-  PC:   { temp_buse: 275, temp_plateau: 110, densite: 1.2, ventilation: false, retraction: 2 },
+  PLA: { famille: 'PLA', temp_buse: 210, temp_plateau: 55, densite: 1.24, ventilation: true, retraction: 2, vitesse: 60,
+    sechage: '45 °C, 4 h si la bobine a pris l\'humidité', note: 'Le plus facile à imprimer.' },
+  'PLA+': { famille: 'PLA', temp_buse: 215, temp_plateau: 60, densite: 1.24, ventilation: true, retraction: 2, vitesse: 60,
+    sechage: '45 °C, 4 h', note: 'PLA renforcé : un peu plus chaud, plus résistant aux chocs.' },
+  'PLA mat': { famille: 'PLA', temp_buse: 210, temp_plateau: 55, densite: 1.3, ventilation: true, retraction: 2, vitesse: 50,
+    sechage: '45 °C, 4 h', note: 'Surface mate ; couches un peu moins solides entre elles.' },
+  'PLA soie': { famille: 'PLA', temp_buse: 220, temp_plateau: 60, densite: 1.24, ventilation: true, retraction: 2, vitesse: 40,
+    sechage: '45 °C, 4 h', note: 'Aspect brillant : imprimer plus chaud et plus lentement.' },
+  'PLA bois': { famille: 'PLA', temp_buse: 205, temp_plateau: 55, densite: 1.15, ventilation: true, retraction: 1.5, vitesse: 45,
+    sechage: '45 °C, 4 h', note: 'Chargé de fibres de bois : une buse de 0,5 mm ou plus évite les bouchons.' },
+  'PLA-CF': { famille: 'PLA', temp_buse: 220, temp_plateau: 60, densite: 1.29, ventilation: true, retraction: 2, vitesse: 50,
+    sechage: '50 °C, 4 h', buse_renforcee: true, note: 'Chargé de fibres de carbone : rigide, abrasif pour la buse.' },
+  PETG: { famille: 'PETG', temp_buse: 240, temp_plateau: 75, densite: 1.27, ventilation: true, retraction: 2.5, vitesse: 50,
+    sechage: '65 °C, 4 h', note: 'Solide et un peu souple ; fait des fils si la bobine est humide.' },
+  'PETG-CF': { famille: 'PETG', temp_buse: 250, temp_plateau: 75, densite: 1.3, ventilation: true, retraction: 2.5, vitesse: 45,
+    sechage: '65 °C, 6 h', buse_renforcee: true, note: 'Chargé de fibres de carbone : abrasif pour la buse.' },
+  PCTG: { famille: 'PETG', temp_buse: 255, temp_plateau: 75, densite: 1.23, ventilation: true, retraction: 2.5, vitesse: 50,
+    sechage: '65 °C, 6 h', note: 'Proche du PETG, plus résistant aux chocs.' },
+  ABS: { famille: 'ABS', temp_buse: 250, temp_plateau: 100, densite: 1.04, ventilation: false, retraction: 2, vitesse: 50,
+    sechage: '80 °C, 4 h', enceinte: true, note: 'Se rétracte en refroidissant : imprimante fermée, sans courant d\'air. Aérer la pièce.' },
+  'ABS+': { famille: 'ABS', temp_buse: 250, temp_plateau: 100, densite: 1.06, ventilation: false, retraction: 2, vitesse: 50,
+    sechage: '80 °C, 4 h', enceinte: true, note: 'ABS qui se déforme un peu moins.' },
+  ASA: { famille: 'ABS', temp_buse: 255, temp_plateau: 100, densite: 1.07, ventilation: false, retraction: 2, vitesse: 50,
+    sechage: '80 °C, 4 h', enceinte: true, note: 'Comme l\'ABS, mais résiste au soleil : pour l\'extérieur.' },
+  HIPS: { famille: 'ABS', temp_buse: 240, temp_plateau: 100, densite: 1.04, ventilation: false, retraction: 2, vitesse: 50,
+    sechage: '65 °C, 4 h', enceinte: true, note: 'Sert aussi de support pour l\'ABS (il se dissout dans le limonène).' },
+  TPU: { famille: 'Souple', temp_buse: 225, temp_plateau: 45, densite: 1.21, ventilation: true, retraction: 1, vitesse: 30,
+    sechage: '65 °C, 6 h', note: 'Souple (dureté 95A) : imprimer lentement, peu de rétraction.' },
+  'TPU 85A': { famille: 'Souple', temp_buse: 230, temp_plateau: 45, densite: 1.19, ventilation: true, retraction: 0.5, vitesse: 20,
+    sechage: '65 °C, 6 h', note: 'Très souple : très lentement, presque sans rétraction.' },
+  PA: { famille: 'Nylon', temp_buse: 270, temp_plateau: 90, densite: 1.14, ventilation: false, retraction: 2, vitesse: 45,
+    sechage: '80 °C, 8 h, puis garder au sec pendant l\'impression', enceinte: true, note: 'Nylon : très solide, mais absorbe vite l\'humidité.' },
+  PA12: { famille: 'Nylon', temp_buse: 255, temp_plateau: 90, densite: 1.01, ventilation: false, retraction: 2, vitesse: 45,
+    sechage: '80 °C, 8 h', enceinte: true, note: 'Nylon qui prend moins l\'humidité et se déforme moins.' },
+  'PA-CF': { famille: 'Nylon', temp_buse: 280, temp_plateau: 90, densite: 1.2, ventilation: false, retraction: 2, vitesse: 40,
+    sechage: '80 °C, 8 h', enceinte: true, buse_renforcee: true, note: 'Nylon chargé de fibres de carbone : très rigide, abrasif.' },
+  'PA-GF': { famille: 'Nylon', temp_buse: 280, temp_plateau: 90, densite: 1.3, ventilation: false, retraction: 2, vitesse: 40,
+    sechage: '80 °C, 8 h', enceinte: true, buse_renforcee: true, note: 'Nylon chargé de fibres de verre : abrasif.' },
+  PC: { famille: 'Technique', temp_buse: 275, temp_plateau: 110, densite: 1.2, ventilation: false, retraction: 2, vitesse: 40,
+    sechage: '80 °C, 8 h', enceinte: true, note: 'Polycarbonate : très résistant à la chaleur, difficile à faire tenir.' },
+  'PC-ABS': { famille: 'Technique', temp_buse: 265, temp_plateau: 105, densite: 1.15, ventilation: false, retraction: 2, vitesse: 45,
+    sechage: '80 °C, 6 h', enceinte: true, note: 'Mélange plus facile à imprimer que le polycarbonate pur.' },
+  PP: { famille: 'Technique', temp_buse: 235, temp_plateau: 85, densite: 0.9, ventilation: true, retraction: 2, vitesse: 40,
+    sechage: '55 °C, 4 h', note: 'Polypropylène : n\'accroche presque que sur lui-même (plateau ou ruban en PP).' },
+  PMMA: { famille: 'Technique', temp_buse: 245, temp_plateau: 100, densite: 1.18, ventilation: false, retraction: 2, vitesse: 40,
+    sechage: '80 °C, 4 h', enceinte: true, note: 'Transparent et rigide, cassant.' },
+  PVA: { famille: 'Support', temp_buse: 200, temp_plateau: 55, densite: 1.23, ventilation: true, retraction: 2, vitesse: 30,
+    sechage: '50 °C, 8 h, à garder en boîte sèche', note: 'Support qui se dissout dans l\'eau. Ne supporte pas l\'humidité.' },
+  BVOH: { famille: 'Support', temp_buse: 210, temp_plateau: 60, densite: 1.14, ventilation: true, retraction: 2, vitesse: 30,
+    sechage: '50 °C, 8 h, à garder en boîte sèche', note: 'Support soluble dans l\'eau, plus rapide à dissoudre que le PVA.' },
 };
+
+// Marques de filament, pour les proposer dans la fiche d'une bobine. La liste
+// n'est pas fermée : on peut taper n'importe quelle autre marque.
+export const MARQUES = ['3D Solutech', '3DJake', '3DXTech', 'Add:North', 'AIO Robotics', 'Amazon Basics', 'Amolen', 'AnkerMake', 'Anycubic',
+  'Arianeplast', 'Artillery', 'Atomic Filament', 'AzureFilm', 'Bambu Lab', 'BASF Ultrafuse', 'CC3D', 'ColorFabb', 'Cookiecad', 'Creality',
+  'Dagoma', 'Das Filament', 'Duramic 3D', 'Elegoo', 'Eryone', 'eSun', 'Extrudr', 'Fiberlogy', 'Fiberthree', 'Fillamentum', 'FlashForge',
+  'FormFutura', 'Francofil', 'Fusion Filaments', 'Geeetech', 'Gizmo Dorks', 'Grossiste3D', 'GST3D', 'Hatchbox', 'IC3D', 'Inland', 'iSanmate',
+  'Jayo', 'Kexcelled', 'Kimya', 'Kingroon', 'Longer', 'MatterHackers', 'Mika3D', 'Nanovia', 'Neofil3D', 'NinjaTek', 'Numakers', 'Overture',
+  'Paramount 3D', 'Phaetus', 'Polymaker', 'Printed Solid', 'Proto-Pasta', 'Prusament', 'Push Plastic', 'Qidi', 'R3D', 'Raise3D', 'Recreus',
+  'Rosa3D', 'Sakata 3D', 'Siraya Tech', 'Smartfil', 'Sovol', 'Spectrum', 'Sunlu', 'Taulman3D', 'Tianse', 'Tinmorry', 'Treed', 'Ultimaker',
+  'Verbatim', 'Voxelab', 'Wanhao', 'Winkle', 'Yousu', 'Ziro', 'Zortrax', 'Zyltech'];
 
 // Bobines d'EXEMPLE, pour que la bibliothèque ne soit pas vide au premier essai.
 export const BOBINES_EXEMPLE = [

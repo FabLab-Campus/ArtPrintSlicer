@@ -20,7 +20,8 @@ const sansAccent = (t) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase
 export function brancherPages(app) {
   const imprimante = brancherImprimante(app);
   const gestionnaire = brancherGestionnaire(app);
-  return { rafraichir() { imprimante.afficher(); gestionnaire.afficher(); } };
+  const projet = brancherProjet(app);
+  return { rafraichir() { imprimante.afficher(); gestionnaire.afficher(); projet.afficher(); }, projet };
 }
 
 // --- Imprimante -----------------------------------------------------------------
@@ -333,6 +334,7 @@ function brancherCalibration(app, { butees, machine }) {
   $('mode-developpeur').addEventListener('change', (e) => {
     $('developpeur').hidden = !e.target.checked;
     if (e.target.checked) {
+      afficherCartes();
       afficherAxes();
       if (!$('dev-journal').childElementCount) journal('retour', 'Mode développeur : les commandes s\'affichent ici. L\'imprimante n\'est pas encore reliée au slicer.');
       $('developpeur').scrollIntoView({ block: 'nearest' });
@@ -340,6 +342,217 @@ function brancherCalibration(app, { butees, machine }) {
   });
   $('vue-calibration').addEventListener('click', afficherCartes);
   afficherCartes();
+  afficherGuides();
+}
+
+// --- Calibration : les guides -------------------------------------------------------
+// Des explications pas à pas, écrites pour quelqu'un qui débute. « image » : ce
+// que montrera l'illustration, quand elle sera fournie.
+
+const GUIDES_REGLAGE = [
+  { titre: '1. Mettre les axes à zéro', image: 'La machine, ses cinq axes et leur position de départ',
+    pourquoi: 'L\'imprimante doit savoir où sont ses cinq axes avant de bouger : X (gauche-droite), Y (avant-arrière), Z (haut-bas), B (pivot de la tête) et C (plateau).',
+    etapes: ['Retire tout ce qui se trouve sur le plateau.', 'Lance la mise à zéro depuis l\'écran de l\'imprimante.',
+      'Vérifie que la tête est bien verticale et le plateau à son repère une fois la mise à zéro finie.'],
+    probleme: 'Un axe ne trouve pas son zéro : vérifie que rien ne le bloque et que son capteur est branché.' },
+  { titre: '2. Régler la hauteur de la première couche', image: 'Trois lignes de première couche : trop haute, bonne, trop écrasée',
+    pourquoi: 'C\'est le réglage qui compte le plus : si la buse est trop haute, la pièce ne colle pas ; trop basse, le filament ne sort pas.',
+    etapes: ['Nettoie le plateau (alcool isopropylique sur un chiffon propre).', 'Imprime un grand carré d\'une seule couche.',
+      'Regarde les lignes : elles doivent se toucher, un peu aplaties, sans creux entre elles ni bourrelets.',
+      'Corrige le décalage en Z sur l\'imprimante par pas de 0,02 mm, et recommence jusqu\'à ce que ce soit bon.'],
+    probleme: 'Lignes rondes qui se décollent : la buse est trop haute. Lignes presque invisibles, extrudeur qui claque : trop basse.' },
+  { titre: '3. Vérifier que la tête est verticale', image: 'La buse et une équerre posée sur le plateau',
+    pourquoi: 'Quand B vaut zéro, la buse doit être parfaitement droite. Sinon toutes les inclinaisons sont décalées d\'autant.',
+    etapes: ['Mets B à zéro.', 'Pose une petite équerre sur le plateau, contre la tête, puis regarde de face et de côté.',
+      'Si la tête penche, corrige le zéro de B sur l\'imprimante (ou le réglage « B quand la buse est verticale », en mode développeur).'],
+    probleme: 'Les pièces penchent toutes du même côté : c\'est presque toujours ce réglage.' },
+  { titre: '4. Centrer le plateau tournant', image: 'La pointe de la buse au-dessus du centre du plateau',
+    pourquoi: 'Le plateau tourne autour de son centre. Le slicer doit savoir exactement où il se trouve, sinon une pièce tournée de 180° n\'est plus au même endroit.',
+    etapes: ['Amène la buse juste au-dessus du centre du plateau, à 1 mm.', 'Fais tourner le plateau d\'un tour complet, lentement.',
+      'La pointe doit rester au-dessus du même point. Si elle décrit un petit cercle, le centre est décalé de la moitié de ce cercle.',
+      'Corrige « centre du plateau » (X et Y) dans les réglages de la machine, en mode développeur.'],
+    probleme: 'Un décalage entre le bas d\'une pièce et une partie imprimée après une rotation du plateau vient souvent de là.' },
+  { titre: '5. Mesurer la distance du pivot à la buse', image: 'Le pivot de la tête et la pointe de la buse, avec la cote entre les deux',
+    pourquoi: 'Quand la tête s\'incline, la pointe de la buse se déplace. Le slicer compense ce déplacement, à condition de connaître la distance exacte entre le pivot et la pointe.',
+    etapes: ['Tête verticale, mesure la distance entre l\'axe du pivot et la pointe de la buse.', 'Reporte-la dans les réglages de la machine (mode développeur).',
+      'Imprime un petit cube en « Tout incliné » à 30° : ses faces doivent être planes et le cube à la bonne taille.'],
+    probleme: 'Une marche à chaque changement d\'inclinaison : cette distance est fausse de quelques dixièmes. Après un changement de buse, elle est à remesurer.' },
+  { titre: '6. Régler le débit', image: 'Un cube à une seule paroi et un pied à coulisse',
+    pourquoi: 'Chaque filament sort un peu plus ou un peu moins que prévu. Le débit corrige cet écart.',
+    etapes: ['Imprime un cube creux à une seule paroi, sans dessus.', 'Mesure l\'épaisseur de la paroi au pied à coulisse, à plusieurs endroits.',
+      'Nouveau débit = débit actuel × largeur voulue ÷ largeur mesurée.', 'Note-le dans la fiche de la bobine (Gestionnaire).'],
+    probleme: 'Surface du dessus bosselée : trop de débit. Trous entre les lignes : pas assez.' },
+  { titre: '7. Régler la température et la rétraction', image: 'Une tour de température et deux petites tours avec des fils entre elles',
+    pourquoi: 'Chaque bobine a sa température idéale. La rétraction empêche le filament de couler pendant les déplacements à vide.',
+    etapes: ['Pars des valeurs de la matière (fiche de la bobine).', 'Imprime une tour de température : garde l\'étage le plus propre.',
+      'Imprime deux petites tours espacées : s\'il y a des fils, augmente la rétraction par pas de 0,2 mm.'],
+    probleme: 'Si la rétraction ne suffit pas, le filament est sans doute humide : il faut le sécher.' },
+];
+
+const GUIDES_PROBLEME = [
+  { titre: 'La première couche ne colle pas', image: 'Une première couche décollée dans un coin',
+    causes: ['Plateau gras ou poussiéreux : nettoie-le à l\'alcool isopropylique.', 'Buse trop haute : reprends le guide 2.',
+      'Plateau pas assez chaud pour la matière : vérifie la fiche de la bobine.', 'Première couche trop rapide : garde 20 mm/s.'] },
+  { titre: 'Des fils entre les parties de la pièce', image: 'Des fils fins tendus entre deux colonnes',
+    causes: ['Filament humide : c\'est la cause la plus fréquente, sèche la bobine.', 'Température trop haute : baisse de 5 °C.',
+      'Rétraction trop courte : augmente par pas de 0,2 mm.'] },
+  { titre: 'Les couches sont décalées', image: 'Une pièce dont le haut est décalé par rapport au bas',
+    causes: ['Une courroie détendue ou une poulie desserrée.', 'La buse a heurté la pièce : un coin relevé, ou une tête trop inclinée près de la pièce.',
+      'Vitesse ou accélération trop fortes pour la machine.'] },
+  { titre: 'Des trous, des lignes manquantes', image: 'Une paroi avec des manques de matière',
+    causes: ['Buse partiellement bouchée : fais une purge à chaud.', 'Température trop basse pour la vitesse demandée.',
+      'Filament qui coince sur la bobine, ou extrudeur qui patine.', 'Débit trop faible : reprends le guide 6.'] },
+  { titre: 'La pièce se décolle ou se déforme', image: 'Un coin de pièce relevé du plateau',
+    causes: ['Matière qui se rétracte en refroidissant (ABS, ASA, nylon) : imprimante fermée, pas de courant d\'air.',
+      'Plateau pas assez chaud.', 'Trop de ventilation sur les premières couches.', 'Grande surface à plat : ajoute une bordure autour de la pièce.'] },
+  { titre: 'En ondulation : une marche entre deux parties', image: 'Un ressaut à la jonction entre le bas et une partie inclinée',
+    causes: ['Distance pivot-buse inexacte : reprends le guide 5.', 'Centre du plateau décalé : reprends le guide 4.',
+      'Tête pas tout à fait verticale à zéro : reprends le guide 3.'] },
+  { titre: 'En ondulation : le slicer refuse de trancher', image: 'Le message du slicer et la position de la machine',
+    causes: ['Le message dit toujours la ligne, la position et une solution : lis-le en entier.',
+      'La tête toucherait la pièce ou le plateau : réduis l\'inclinaison de la zone, ou place-la plus haut.',
+      'Une zone trop inclinée près du plateau : au ras du plateau, la tête ne dépasse pas la limite réglée.'] },
+];
+
+function afficherGuides() {
+  const fabriquer = (guide, corps) => {
+    const bloc = el('details', 'guide');
+    bloc.append(el('summary', '', guide.titre));
+    const contenu = el('div', 'guide-corps');
+    contenu.append(...corps, el('div', 'guide-image', `Illustration à venir : ${guide.image}`));
+    bloc.append(contenu);
+    return bloc;
+  };
+  const liste = (balise, lignes) => { const l = el(balise); for (const ligne of lignes) l.append(el('li', '', ligne)); return l; };
+  const paragraphe = (titre, texte) => { const p = el('p'); p.append(el('b', '', titre + ' '), document.createTextNode(texte)); return p; };
+  $('guides-reglage').replaceChildren(...GUIDES_REGLAGE.map((g) => fabriquer(g, [
+    paragraphe('Pourquoi.', g.pourquoi), liste('ol', g.etapes), paragraphe('Si ça ne va pas.', g.probleme)])));
+  $('guides-probleme').replaceChildren(...GUIDES_PROBLEME.map((g) => fabriquer(g, [
+    paragraphe('Ce qu\'il faut vérifier, dans l\'ordre :', ''), liste('ol', g.causes)])));
+}
+
+// --- Projet -------------------------------------------------------------------------
+// Le projet en cours (son nom, ses notes, où il en est) et la bibliothèque des
+// projets déjà enregistrés, rangés par dossiers.
+
+const STATUTS = [['idee', 'Idée'], ['preparation', 'En préparation'], ['pret', 'Prêt à imprimer'], ['imprime', 'Imprimé']];
+const nomDeFichier = (chemin) => String(chemin || '').split(/[\\/]/).pop();
+
+function brancherProjet(app) {
+  const filtre = { dossier: '', statut: '', recherche: '' };
+
+  function afficherCourant() {
+    const zone = $('projet-courant');
+    const infos = app.projet.infos();
+    const etat = app.projet.etat();
+    const contenu = [];
+    contenu.push(el('h3', '', etat.cheminProjet ? nomDeFichier(etat.cheminProjet).replace(/\.artprint$/i, '') : (etat.modele ? 'Projet sans titre' : 'Aucun projet ouvert')));
+    if (!etat.modele) {
+      contenu.push(el('p', 'aide', 'Ouvre un modèle (menu Fichier), ou reprends un projet de la liste. Un projet garde la pièce, sa pose, ses coupes, ses zones, tous les réglages, tes notes et où tu en es.'));
+      zone.replaceChildren(...contenu);
+      return;
+    }
+    const faits = el('dl', 'projet-faits');
+    const fait = (nom, valeur) => faits.append(el('dt', '', nom), el('dd', '', valeur));
+    fait('Modèle', etat.modele);
+    fait('Taille', etat.taille);
+    fait('Stratégie', etat.strategie);
+    fait('Fichier', etat.cheminProjet || 'pas encore enregistré');
+    contenu.push(faits);
+    // Où en est le projet : quatre étapes, cochées toutes seules.
+    const etapes = el('ul', 'projet-etapes');
+    for (const [texte, ok] of [['Modèle ouvert', true], ['Tranché, G-code vérifié', etat.tranche], ['G-code exporté', etat.exporte], ['Projet enregistré', Boolean(etat.cheminProjet)]]) {
+      etapes.append(el('li', ok ? 'fait' : '', texte));
+    }
+    contenu.push(etapes);
+    const champ = (libelle, element) => { const l = el('label', '', libelle); l.append(element); return l; };
+    const dossier = el('input', 'champ texte');
+    dossier.id = 'projet-info-dossier';
+    dossier.type = 'text';
+    dossier.value = infos.dossier;
+    dossier.placeholder = 'Par exemple : Figurines, Pièces de la machine';
+    dossier.setAttribute('list', 'liste-dossiers');
+    dossier.addEventListener('change', () => { app.projet.definirInfos({ dossier: dossier.value.trim() }); afficherBibliotheque(); });
+    const statut = el('select', 'champ');
+    statut.id = 'projet-info-statut';
+    for (const [valeur, texte] of STATUTS) statut.add(new Option(texte, valeur, false, valeur === infos.statut));
+    statut.addEventListener('change', () => { app.projet.definirInfos({ statut: statut.value }); afficherBibliotheque(); });
+    const notes = el('textarea');
+    notes.id = 'projet-info-notes';
+    notes.value = infos.notes;
+    notes.placeholder = 'Tes notes : réglages essayés, ce qui a marché, ce qu\'il reste à faire…';
+    notes.addEventListener('change', () => { app.projet.definirInfos({ notes: notes.value }); afficherBibliotheque(); });
+    contenu.push(champ('Dossier (pour ranger le projet)', dossier), champ('Avancement', statut), champ('Notes', notes));
+    const boutons = el('div', 'projet-boutons');
+    for (const [id, libelle, action, plein] of [['projet-enregistrer', 'Enregistrer le projet', () => app.projet.enregistrer(), true],
+      ['projet-preparer', 'Aller à la préparation', () => app.allerA('preparer'), false]]) {
+      const bouton = el('button', 'bouton' + (plein ? ' plein' : ''), libelle);
+      bouton.id = id;
+      bouton.addEventListener('click', async () => { await action(); afficher(); });
+      boutons.append(bouton);
+    }
+    contenu.push(boutons, el('p', 'aide', 'Le dossier, l\'avancement et les notes sont enregistrés avec le projet.'));
+    zone.replaceChildren(...contenu);
+  }
+
+  function afficherBibliotheque() {
+    const projets = app.projet.bibliotheque();
+    const dossiers = [...new Set(projets.map((x) => x.dossier).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
+    // Les dossiers connus sont proposés quand on range un projet.
+    let liste = $('liste-dossiers');
+    if (!liste) { liste = el('datalist'); liste.id = 'liste-dossiers'; document.body.append(liste); }
+    liste.replaceChildren(...dossiers.map((d) => new Option(d, d)));
+    const remplir = (id, premiere, choix, valeur) => {
+      const select = $(id);
+      select.replaceChildren(new Option(premiere, ''), ...choix.map(([v, t]) => new Option(t, v, false, v === valeur)));
+    };
+    remplir('projet-dossier', 'Dossier : tous', [...dossiers.map((d) => [d, d]), ['__aucun', 'Sans dossier']], filtre.dossier);
+    remplir('projet-statut', 'Avancement : tous', STATUTS, filtre.statut);
+    const cherche = sansAccent(filtre.recherche.trim());
+    const visibles = projets.filter((x) => (!filtre.dossier || (filtre.dossier === '__aucun' ? !x.dossier : x.dossier === filtre.dossier)) &&
+      (!filtre.statut || x.statut === filtre.statut) &&
+      (!cherche || sansAccent(`${x.nom} ${x.modele} ${x.dossier} ${x.notes}`).includes(cherche)));
+    const zone = $('projet-liste');
+    if (!projets.length) {
+      zone.replaceChildren(el('p', 'aide', 'Aucun projet enregistré pour l\'instant. Ouvre un modèle, prépare-le, puis clique sur « Enregistrer le projet » : il apparaîtra ici, et tu pourras le rouvrir d\'un clic.'));
+      return;
+    }
+    if (!visibles.length) { zone.replaceChildren(el('p', 'aide', 'Aucun projet ne correspond à ces filtres.')); return; }
+    const courant = app.projet.etat().cheminProjet;
+    zone.replaceChildren(...visibles.map((x) => {
+      const fiche = el('div', 'projet-fiche' + (x.chemin === courant ? ' courant' : ''));
+      fiche.id = 'projet-' + (projets.indexOf(x) + 1);
+      const texte = el('div');
+      texte.append(el('b', '', x.nom), el('small', '', `${x.modele} · enregistré le ${x.date}`), el('small', '', x.chemin));
+      const etiquettes = el('div', 'etiquettes');
+      etiquettes.append(el('span', `pastille statut-${x.statut}`, STATUTS.find(([v]) => v === x.statut)?.[1] ?? 'Idée'));
+      if (x.dossier) etiquettes.append(el('span', 'pastille', x.dossier));
+      if (x.notes) etiquettes.append(el('span', 'pastille', x.notes.length > 60 ? x.notes.slice(0, 57) + '…' : x.notes));
+      texte.append(etiquettes);
+      const actions = el('div', 'actions');
+      const ouvrir = el('button', 'bouton fin', x.chemin === courant ? 'Ouvert' : 'Ouvrir');
+      ouvrir.disabled = x.chemin === courant;
+      ouvrir.addEventListener('click', async () => { await app.projet.ouvrir(x.chemin); afficher(); });
+      const retirer = el('button', 'bouton-icone');
+      retirer.title = 'Retirer de la liste (le fichier du projet n\'est pas supprimé)';
+      retirer.setAttribute('aria-label', `Retirer ${x.nom} de la liste`);
+      retirer.append(icone('supprimer'));
+      retirer.addEventListener('click', () => { app.projet.retirer(x.chemin); afficherBibliotheque(); });
+      actions.append(ouvrir, retirer);
+      fiche.append(texte, actions);
+      return fiche;
+    }));
+  }
+
+  function afficher() { afficherCourant(); afficherBibliotheque(); }
+  $('projet-dossier').addEventListener('change', (e) => { filtre.dossier = e.target.value; afficherBibliotheque(); });
+  $('projet-statut').addEventListener('change', (e) => { filtre.statut = e.target.value; afficherBibliotheque(); });
+  $('projet-recherche').addEventListener('input', (e) => { filtre.recherche = e.target.value; afficherBibliotheque(); });
+  $('projet-nouveau').addEventListener('click', async () => { await app.projet.nouveau(); afficher(); });
+  $('projet-ouvrir-fichier').addEventListener('click', async () => { await app.projet.ouvrir(); afficher(); });
+  $('vue-projet').addEventListener('click', afficher);
+  afficher();
+  return { afficher };
 }
 
 // --- Gestionnaire de bobines ------------------------------------------------------

@@ -199,7 +199,8 @@ export class Vue3D {
     const sombre = this.estSombre();
     const disque = new THREE.Mesh(
       new THREE.CircleGeometry(rayon, 128),
-      new THREE.MeshBasicMaterial({ color: this.jeton('--c-plateau', sombre ? '#262c36' : '#fbfcfd'), side: THREE.DoubleSide }));
+      new THREE.MeshBasicMaterial({ color: this.jeton('--c-plateau', sombre ? '#262c36' : '#fbfcfd'), side: THREE.DoubleSide,
+        transparent: true, opacity: 0.7, depthWrite: false }));
     disque.position.z = -0.05;
     this.plateau.add(disque);
 

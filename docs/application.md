@@ -147,11 +147,16 @@ temps ; le tranchage attend que les gestes en cours soient pris en compte.
   (nom, durée, poids, date, chemin).
 - **Imprimante › Mise à jour** : la version du slicer, celle du firmware
   quand l'imprimante sera reliée, et le profil de la machine.
-- **Calibration** : six fiches, une par mesure à faire sur la machine
-  (distance pivot-buse, encombrement de la tête, butées de B, sens de B et
-  C, courses, rétraction), avec les valeurs déjà renseignées.
-- **Mode développeur** (interrupteur de la page Calibration) : déplacements
-  des cinq axes et commandes G-code, avec un journal.
+- **Calibration** : des guides à déplier. « Régler l'imprimante » (sept
+  réglages dans l'ordre, chacun avec le pourquoi, les étapes et quoi faire
+  si ça ne va pas) et « En cas de problème » (sept pannes courantes, avec ce
+  qu'il faut vérifier dans l'ordre). Chaque guide a un emplacement pour une
+  illustration, encore vide.
+- **Mode développeur** (interrupteur de la page Calibration, éteint au
+  départ) : les six fiches de mesure de la machine (distance pivot-buse,
+  encombrement de la tête, butées de B, sens de B et C, courses,
+  rétraction), puis les déplacements des cinq axes et les commandes G-code,
+  avec un journal.
 
 **L'imprimante n'est pas encore reliée au slicer.** Rien n'est envoyé à la
 machine : le journal du mode développeur montre les commandes qui
@@ -209,6 +214,22 @@ avec les mêmes choix rend la réponse déjà prête.
   stratégie, les zones et tous les réglages. Il ne contient pas le modèle
   lui-même : si le fichier STL est déplacé, le projet ne le retrouve plus.
 - **Ouvrir un projet**, **Nouveau projet** : menu Fichier.
+- **Page Projet** : à gauche le projet en cours (modèle, taille, stratégie,
+  quatre étapes cochées toutes seules : ouvert, tranché, exporté,
+  enregistré), avec un dossier pour le ranger, un avancement (idée, en
+  préparation, prêt à imprimer, imprimé) et des notes, tous écrits dans le
+  fichier `.artprint`. À droite « Mes projets » : les projets enregistrés ou
+  ouverts sur cet ordinateur, à filtrer par dossier, par avancement ou par
+  recherche, et à rouvrir d'un clic. Retirer un projet de la liste ne
+  supprime pas son fichier.
+- **Plateaux** : chaque plateau garde sa pièce, sa pose et ce qui a été
+  calculé pour elle. Revenir sur un plateau ne relit ni ne recalcule rien,
+  sauf si les réglages ont changé entre-temps.
+- **Bobines** : 25 matières rangées par familles, chacune avec ses réglages
+  de départ (températures, rétraction, ventilation, vitesse, séchage,
+  enceinte fermée, buse renforcée), et une liste de marques à choisir ou à
+  compléter à la main. Ce sont des valeurs habituelles par matière, pas les
+  données des fabricants : la valeur exacte est celle écrite sur la bobine.
 - **Exporter en STL** : le modèle tel qu'il est posé (échelle, rotation,
   coupes), en STL binaire.
 
@@ -234,5 +255,5 @@ gradué tous les 25 mm à partir de 50 mm, avec le nom du logiciel à l'avant.
 - **Supports** : toujours 0 g, le slicer n'en fabrique pas.
 - **La simulation** ne recalcule rien : les zones et les options de l'ondulation,
   l'échelle et l'orientation n'y changent pas le tranchage affiché.
-- **Pages Imprimante, Projet, Calibration, Gestionnaire** : ce sont encore
-  des maquettes, non reliées à une vraie imprimante.
+- **Pages Imprimante, Calibration (mode développeur), Gestionnaire** : elles
+  ne sont pas encore reliées à une vraie imprimante.
