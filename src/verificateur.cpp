@@ -11,6 +11,7 @@
 //   Le cordon n'est ajouté à la grille qu'avec un peu de retard : sinon il
 //   se « verrait » lui-même juste derrière la buse.
 #include "verificateur.hpp"
+#include "avancement.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -738,8 +739,23 @@ RapportVerification verifier_gcode(std::istream& gcode, const Reglages& reglages
 }
 
 RapportVerification verifier_gcode_texte(std::string_view gcode, const Reglages& reglages) {
-    std::istringstream flux{std::string(gcode)};
-    return verifier_gcode(flux, reglages);
+    // Le texte est lu sur place, ligne par ligne (sans en faire de copie).
+    Verificateur verificateur(reglages);
+    int numero = 0;
+    std::size_t debut = 0;
+    avancement::noter(avancement::Etape::verification, 0.0);
+    while (debut < gcode.size()) {
+        std::size_t fin = gcode.find('\n', debut);
+        if (fin == std::string_view::npos) {
+            fin = gcode.size();
+        }
+        verificateur.traiter_ligne(++numero, gcode.substr(debut, fin - debut));
+        debut = fin + 1;
+        if (numero % 4096 == 0) {
+            avancement::noter(avancement::Etape::verification, static_cast<double>(debut) / static_cast<double>(gcode.size()));
+        }
+    }
+    return verificateur.terminer();
 }
 
 struct VerificationSuivie::Interne {

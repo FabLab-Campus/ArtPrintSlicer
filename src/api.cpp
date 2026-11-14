@@ -2,6 +2,7 @@
 #include "api.hpp"
 #include "decoupe.hpp"
 #include "connecteurs.hpp"
+#include "avancement.hpp"
 
 #include <cstdlib>
 #include <cmath>
@@ -57,6 +58,9 @@ struct Session::Etat {
     // qui dépassent un peu de la pièce sans en faire partie : ils ne comptent
     // ni pour la poser sur le plateau ni pour ses dimensions. 0 : tous comptent.
     std::size_t sommets_solides = 0;
+    // La dernière réponse de « trancher », pour la version et la demande données.
+    std::string demande_tranchee, reponse_tranchee;
+    std::uint64_t version_tranchee = 0;
 };
 
 namespace {
@@ -107,6 +111,76 @@ Json liste_reglages(const Reglages& reglages) {
     return liste;
 }
 
+// Un bloc de nombres (flottants de 32 bits) écrit en base64 : bien plus court
+// et plus rapide à lire pour l'interface qu'une liste de nombres en texte.
+std::string en_base64(const std::vector<float>& nombres) {
+    static const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const auto* octets = reinterpret_cast<const unsigned char*>(nombres.data());
+    const std::size_t taille = nombres.size() * sizeof(float);
+    std::string texte;
+    texte.resize((taille + 2) / 3 * 4);
+    std::size_t o = 0;
+    for (std::size_t i = 0; i < taille; i += 3) {
+        const unsigned a = octets[i], b = i + 1 < taille ? octets[i + 1] : 0u, c = i + 2 < taille ? octets[i + 2] : 0u;
+        texte[o++] = alphabet[a >> 2];
+        texte[o++] = alphabet[((a & 3u) << 4) | (b >> 4)];
+        texte[o++] = i + 1 < taille ? alphabet[((b & 15u) << 2) | (c >> 6)] : '=';
+        texte[o++] = i + 2 < taille ? alphabet[c & 63u] : '=';
+    }
+    return texte;
+}
+
+// Normales lissées, une par coin de triangle : en chaque sommet, la moyenne
+// (pondérée par l'aire) des faces voisines qui font moins de 40° avec celle
+// du triangle. La pièce est montrée lisse, avec ses vraies arêtes vives.
+std::vector<float> normales_lissees(const Maillage& modele) {
+    const std::size_t nt = modele.triangles.size();
+    std::vector<Vec3> faces(nt);
+    std::vector<std::uint32_t> debut(modele.sommets.size() + 1, 0);
+    for (std::size_t t = 0; t < nt; ++t) {
+        const auto& tri = modele.triangles[t].sommets;
+        const Point3& a = modele.sommets[tri[0]];
+        const Point3& b = modele.sommets[tri[1]];
+        const Point3& c = modele.sommets[tri[2]];
+        faces[t] = produit_vectoriel(Vec3{b.x - a.x, b.y - a.y, b.z - a.z}, Vec3{c.x - a.x, c.y - a.y, c.z - a.z});
+        for (const std::uint32_t i : tri) {
+            ++debut[i + 1];
+        }
+    }
+    for (std::size_t i = 1; i < debut.size(); ++i) {
+        debut[i] += debut[i - 1];
+    }
+    // Pour chaque sommet, la liste des triangles qui le touchent.
+    std::vector<std::uint32_t> voisins(debut.back()), place(debut.begin(), debut.end() - 1);
+    for (std::size_t t = 0; t < nt; ++t) {
+        for (const std::uint32_t i : modele.triangles[t].sommets) {
+            voisins[place[i]++] = static_cast<std::uint32_t>(t);
+        }
+    }
+    const double seuil = std::cos(40.0 * std::numbers::pi / 180.0);
+    std::vector<float> normales(nt * 9);
+    for (std::size_t t = 0; t < nt; ++t) {
+        const double longueur = norme(faces[t]);
+        for (int k = 0; k < 3; ++k) {
+            const std::uint32_t i = modele.triangles[t].sommets[static_cast<std::size_t>(k)];
+            Vec3 somme{};
+            for (std::uint32_t v = debut[i]; v < debut[i + 1]; ++v) {
+                const Vec3& g = faces[voisins[v]];
+                const double lg = norme(g);
+                if (longueur <= 0.0 || lg <= 0.0 || produit_scalaire(faces[t], g) >= seuil * longueur * lg) {
+                    somme = somme + g;
+                }
+            }
+            const double l = norme(somme);
+            const Vec3 n = l > 0.0 ? somme * (1.0 / l) : Vec3{0.0, 0.0, 1.0};
+            normales[t * 9 + static_cast<std::size_t>(k) * 3] = static_cast<float>(n.x);
+            normales[t * 9 + static_cast<std::size_t>(k) * 3 + 1] = static_cast<float>(n.y);
+            normales[t * 9 + static_cast<std::size_t>(k) * 3 + 2] = static_cast<float>(n.z);
+        }
+    }
+    return normales;
+}
+
 // La boîte de la matière : celle des « solides » premiers sommets (0 : tous).
 BoiteEnglobante boite_solide(const Maillage& modele, std::size_t solides) {
     if (solides == 0 || solides >= modele.sommets.size()) {
@@ -133,28 +207,47 @@ Maillage poser_solide(const Maillage& modele, std::size_t solides) {
     return pose;
 }
 
-Json decrire_modele(const Maillage& modele, std::size_t solides = 0) {
+// « binaire » : les triangles et leurs normales lissées en blocs base64
+// (« positions_b64 », « normales_b64 ») au lieu d'une liste de nombres.
+Json decrire_modele(const Maillage& modele, std::size_t solides = 0, bool binaire = false) {
     const BoiteEnglobante boite = boite_solide(modele, solides);
     const Point3 taille = boite.dimensions();
     const RapportFermeture fermeture = verifier_fermeture(modele);
 
     // Triangles à plat : 9 nombres par triangle (x, y, z de chaque sommet).
     Json positions = Json::array();
-    for (const Triangle& triangle : modele.triangles) {
-        for (const std::uint32_t indice : triangle.sommets) {
-            const Point3& p = modele.sommets[indice];
-            positions.push_back(arrondi(p.x));
-            positions.push_back(arrondi(p.y));
-            positions.push_back(arrondi(p.z));
+    Json reponse;
+    if (binaire) {
+        std::vector<float> plat;
+        plat.reserve(modele.triangles.size() * 9);
+        for (const Triangle& triangle : modele.triangles) {
+            for (const std::uint32_t indice : triangle.sommets) {
+                const Point3& p = modele.sommets[indice];
+                plat.push_back(static_cast<float>(p.x));
+                plat.push_back(static_cast<float>(p.y));
+                plat.push_back(static_cast<float>(p.z));
+            }
+        }
+        reponse["positions_b64"] = en_base64(plat);
+        reponse["normales_b64"] = en_base64(normales_lissees(modele));
+    } else {
+        for (const Triangle& triangle : modele.triangles) {
+            for (const std::uint32_t indice : triangle.sommets) {
+                const Point3& p = modele.sommets[indice];
+                positions.push_back(arrondi(p.x));
+                positions.push_back(arrondi(p.y));
+                positions.push_back(arrondi(p.z));
+            }
         }
     }
-    Json reponse;
     reponse["triangles"] = modele.triangles.size();
     reponse["volume_cm3"] = arrondi(volume_maillage(modele) / 1000.0);
     reponse["dimensions"] = {arrondi(taille.x), arrondi(taille.y), arrondi(taille.z)};
     reponse["ferme"] = fermeture.ferme && fermeture.orientation_coherente;
     reponse["message_fermeture"] = fermeture.message;
-    reponse["positions"] = std::move(positions);
+    if (!binaire) {
+        reponse["positions"] = std::move(positions);
+    }
     return reponse;
 }
 
@@ -218,7 +311,7 @@ void garder_le_refus(const ResultatTranchage& resultat) {
     }
 }
 
-Json decrire_resultat(const ResultatTranchage& resultat) {
+Json decrire_resultat(const ResultatTranchage& resultat, bool binaire = false) {
     Json reponse;
     reponse["couches"] = resultat.couches;
     reponse["filament_m"] = arrondi(resultat.longueur_filament / 1000.0);
@@ -250,6 +343,18 @@ Json decrire_resultat(const ResultatTranchage& resultat) {
     // (départ x y z, arrivée x y z, type).
     Json apercu = Json::array();
     for (const CoucheApercu& couche : resultat.apercu) {
+        if (binaire) {
+            std::vector<float> bloc;
+            bloc.reserve(couche.mouvements.size() * 7);
+            for (const MouvementApercu& m : couche.mouvements) {
+                for (const float v2 : {m.x0, m.y0, m.z0, m.x1, m.y1, m.z1}) {
+                    bloc.push_back(v2);
+                }
+                bloc.push_back(static_cast<float>(m.type));
+            }
+            apercu.push_back({{"z", arrondi(couche.z)}, {"partie", couche.partie}, {"m_b64", en_base64(bloc)}});
+            continue;
+        }
         Json mouvements = Json::array();
         for (const MouvementApercu& m : couche.mouvements) {
             for (const float v2 : {m.x0, m.y0, m.z0, m.x1, m.y1, m.z1}) {
@@ -283,6 +388,10 @@ double secondes_depuis(std::chrono::steady_clock::time_point debut) {
 
 std::string Session::executer(std::string_view demande_json) {
     Etat& etat = *etat_;
+    // L'avancement du tranchage en cours se lit sans attendre la fin du tranchage.
+    if (demande_json.find("\"avancement\"") != std::string_view::npos) {
+        return Json{{"ok", true}, {"etape", avancement::nom()}, {"pour_cent", avancement::pour_cent()}}.dump();
+    }
     // La recherche des façons d'imprimer est longue et ne change rien à la
     // session : elle se fait sur une copie du modèle, sans retenir les autres
     // commandes (on peut trancher en classique pendant ce temps).
@@ -324,7 +433,20 @@ std::string Session::executer(std::string_view demande_json) {
         }
     }
     const std::lock_guard<std::mutex> garde(etat.verrou);
-    return executer_sous_verrou(demande_json);
+    // Retrancher la même pièce avec les mêmes choix : la réponse est déjà prête.
+    const bool tranchage = demande_json.find("\"trancher\"") != std::string_view::npos;
+    if (tranchage && etat.resultat && etat.version_tranchee == etat.version && etat.demande_tranchee == demande_json) {
+        return etat.reponse_tranchee;
+    }
+    std::string reponse = executer_sous_verrou(demande_json);
+    if (tranchage && etat.resultat && reponse.find("\"ok\":true") != std::string::npos) {
+        etat.demande_tranchee = std::string(demande_json);
+        etat.reponse_tranchee = reponse;
+        etat.version_tranchee = etat.version;
+    } else if (tranchage) {
+        etat.demande_tranchee.clear();
+    }
+    return reponse;
 }
 
 std::string Session::executer_sous_verrou(std::string_view demande_json) {
@@ -396,7 +518,7 @@ std::string Session::executer_sous_verrou(std::string_view demande_json) {
             etat.rotation = {0.0, 0.0, 0.0};
             etat.decalage = {0.0, 0.0};
             etat.resultat.reset();
-            reponse["modele"] = decrire_modele(*etat.modele, etat.sommets_solides);
+            reponse["modele"] = decrire_modele(*etat.modele, etat.sommets_solides, demande.value("binaire", false));
             reponse["modele"]["format"] = nom_format(modele.format);
         } else if (commande == "transformer_modele") {
             // Met le modèle à l'échelle et choisit sa pose. On repart toujours
@@ -486,7 +608,7 @@ std::string Session::executer_sous_verrou(std::string_view demande_json) {
                 p.y = static_cast<decltype(p.y)>(p.y + etat.decalage[1]);
             }
             etat.resultat.reset();
-            reponse["modele"] = decrire_modele(*etat.modele, etat.sommets_solides);
+            reponse["modele"] = decrire_modele(*etat.modele, etat.sommets_solides, demande.value("binaire", false));
             reponse["rotation"] = etat.rotation;
             reponse["decalage"] = etat.decalage;
             reponse["echelle"] = etat.echelle;
@@ -497,6 +619,7 @@ std::string Session::executer_sous_verrou(std::string_view demande_json) {
                 throw std::runtime_error("Aucun modèle n'est ouvert.");
             }
             verifier_coherence(etat.reglages);
+            avancement::noter(avancement::Etape::preparation);
             // « strategie » (facultatif) : "classique" ou "couches_courbes".
             const std::string voulue = demande.value("strategie", std::string("classique"));
             if (voulue == "classique") {
@@ -602,7 +725,7 @@ std::string Session::executer_sous_verrou(std::string_view demande_json) {
                         etat.resultat->remarques.push_back(
                             "Toutes les branches sont imprimées à plat : c'est une impression classique.");
                         garder_le_refus(*etat.resultat);
-                        reponse["resultat"] = decrire_resultat(*etat.resultat);
+                        reponse["resultat"] = decrire_resultat(*etat.resultat, demande.value("binaire", false));
                         reponse["resultat"]["preparation_s"] = std::round(etat.reglages.impression.duree_preparation * 60.0);
                         reponse["resultat"]["duree_classique_s"] = std::round(etat.resultat->duree_estimee);
                         reponse["strategie"] = voulue;
@@ -622,7 +745,7 @@ std::string Session::executer_sous_verrou(std::string_view demande_json) {
                 etat.resultat = trancher_strategie(*choisie, etat.reglages);
             }
             garder_le_refus(*etat.resultat);
-            reponse["resultat"] = decrire_resultat(*etat.resultat);
+            reponse["resultat"] = decrire_resultat(*etat.resultat, demande.value("binaire", false));
             reponse["resultat"]["preparation_s"] = std::round(etat.reglages.impression.duree_preparation * 60.0);
             reponse["strategie"] = voulue;
             // Pour l'ondulation : la durée du même modèle en classique, pour
@@ -637,6 +760,7 @@ std::string Session::executer_sous_verrou(std::string_view demande_json) {
                 }
                 reponse["resultat"]["duree_classique_s"] = std::round(*etat.duree_classique);
             }
+            avancement::noter(avancement::Etape::fini);
             reponse["secondes"] = secondes_depuis(debut_commande);
         } else if (commande == "exporter_stl") {
             // Le modèle tel qu'il est posé sur le plateau, en STL binaire.
@@ -757,7 +881,7 @@ std::string Session::executer_sous_verrou(std::string_view demande_json) {
                 sommet.y = static_cast<decltype(sommet.y)>(sommet.y + etat.decalage[1]);
             }
             etat.resultat.reset();
-            reponse["modele"] = decrire_modele(*etat.modele, etat.sommets_solides);
+            reponse["modele"] = decrire_modele(*etat.modele, etat.sommets_solides, demande.value("binaire", false));
             reponse["rotation"] = etat.rotation;
             reponse["decalage"] = etat.decalage;
             reponse["echelle"] = etat.echelle;

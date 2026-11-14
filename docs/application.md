@@ -184,6 +184,20 @@ façons d'imprimer se fait en arrière-plan sans retenir le tranchage, et ce
 qui a déjà été calculé pour une pièce (stratégies, durée du classique) est
 gardé tant que ni la pièce ni les réglages ne changent.
 
+## Pendant un tranchage
+
+Rien ne couvre la vue. Un petit cadre, dans l'angle en bas à droite, donne
+l'étape en cours (trajectoires, écriture, vérification), une barre et un pour
+cent ; en haut à gauche, une vignette du plateau est voilée de gris, et le
+voile descend à mesure que le calcul avance. Le moteur note son avancement
+(`src/avancement.hpp`) et l'interface le lit par la commande `avancement`,
+qui répond sans attendre la fin du tranchage.
+
+Les triangles du modèle, leurs normales lissées (calculées par le moteur) et
+l'aperçu des trajectoires sont transmis à l'interface en blocs de nombres
+compacts (base64) plutôt qu'en listes de nombres. Retrancher la même pièce
+avec les mêmes choix rend la réponse déjà prête.
+
 ## Projet, annuler, exporter
 
 - **Annuler / Refaire** (flèches en haut à gauche, Ctrl+Z et Ctrl+Y) : la

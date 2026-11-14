@@ -201,6 +201,14 @@
       <ol id="erreurs"></ol>
     </div>
 
+    <div class="palette tranchage" id="tranchage" role="status" aria-live="polite" hidden>
+      <div class="tranchage-ligne"><span id="tranchage-etape">Préparation</span><b id="tranchage-pour-cent">0 %</b></div>
+      <progress id="tranchage-barre" max="100" value="0" aria-label="Avancement du tranchage"></progress>
+    </div>
+    <div class="palette vignette-plateau" id="vignette-plateau" aria-hidden="true" hidden>
+      <img id="vignette-image" alt="">
+      <span class="vignette-voile" id="vignette-voile"></span>
+    </div>
     <div class="attente" id="attente" hidden><span id="attente-texte">Tranchage en cours…</span><div class="barre-attente" aria-hidden="true"></div></div>
   </main>
 </div>

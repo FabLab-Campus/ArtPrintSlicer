@@ -117,6 +117,7 @@ function choisirPiece() {
 // Vrai : les réponses viennent d'enregistrements, pas du vrai slicer.
 export const simulation = true;
 let projetSimule = null;
+let debutTranchage = 0;
 
 export async function appeler(commande, parametres = {}) {
   await charger();
@@ -204,8 +205,14 @@ export async function appeler(commande, parametres = {}) {
         parties: [{ inclinaison: 0, volume_cm3: part, surplomb_mm2: 0, parent: -1 },
           ...zones.map((z) => ({ inclinaison: z.inclinaison, volume_cm3: part, surplomb_mm2: 0, parent: 0 }))] } };
     }
+    case 'avancement': {
+      // Simulation : l'avancement suit le temps écoulé depuis le début du tranchage.
+      const p = Math.min(99, Math.round((Date.now() - debutTranchage) / 7));
+      return { ok: true, pour_cent: p, etape: p < 45 ? 'Calcul des trajectoires' : p < 55 ? 'Écriture du G-code' : 'Vérification du G-code' };
+    }
     case 'trancher': {
       if (!piece) return { ok: false, erreur: 'Aucun modèle n\'est ouvert.' };
+      debutTranchage = Date.now();
       await pause(700);
       const strategie = parametres.strategie || 'classique';
       if (strategie === 'classique') return { ok: true, resultat: { ...piece.resultat, preparation_s: 300 }, strategie };

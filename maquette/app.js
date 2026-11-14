@@ -28,7 +28,7 @@ const memoire = {
 };
 
 const vue3d = new Vue3D($('canvas3d'));
-window.artprint = { vue3d };
+window.artprint = { vue3d };   // (complété plus bas par l'état)
 let pages = null;        // pages Imprimante et Gestionnaire, branchées au démarrage
 
 const etat = {
@@ -66,6 +66,8 @@ const etat = {
   remarques: [],        // remarques du dernier tranchage
 };
 
+window.artprint.etat = etat;
+
 // --- Nombres -------------------------------------------------------------------
 
 const fr = (valeur, decimales = 1) => Number(valeur).toLocaleString('fr-FR',
@@ -100,10 +102,34 @@ function dire(texte, { info = false, actions = [], tenir = false } = {}) {
 }
 function occuper(texte) { $('attente-texte').textContent = texte; $('attente').hidden = false; }
 function liberer() { $('attente').hidden = true; }
-async function demander(commande, parametres) {
-  const reponse = await appeler(commande, parametres);
-  if (!reponse.ok) { dire(reponse.erreur || 'Erreur inconnue.'); return null; }
+// Un bloc de nombres envoyé par le slicer (base64) redevient un tableau de nombres.
+function decoder(texte) {
+  const brut = atob(texte);
+  const octets = new Uint8Array(brut.length);
+  for (let i = 0; i < brut.length; i++) octets[i] = brut.charCodeAt(i);
+  return new Float32Array(octets.buffer);
+}
+// Les grosses réponses (triangles du modèle, aperçu du tranchage) arrivent en
+// blocs compacts, bien plus rapides à transmettre et à lire qu'une liste de nombres.
+const COMMANDES_COMPACTES = ['charger_modele', 'transformer_modele', 'couper_modele', 'trancher'];
+function deballer(reponse) {
+  const modele = reponse.modele;
+  if (modele?.positions_b64 !== undefined) {
+    modele.positions = decoder(modele.positions_b64);
+    modele.normales = decoder(modele.normales_b64);
+    delete modele.positions_b64;
+    delete modele.normales_b64;
+  }
+  for (const couche of reponse.resultat?.apercu ?? []) {
+    if (couche.m_b64 !== undefined) { couche.m = decoder(couche.m_b64); delete couche.m_b64; }
+  }
   return reponse;
+}
+async function demander(commande, parametres) {
+  const compact = !simulation && COMMANDES_COMPACTES.includes(commande);
+  const reponse = await appeler(commande, compact ? { ...parametres, binaire: true } : parametres);
+  if (!reponse.ok) { dire(reponse.erreur || 'Erreur inconnue.'); return null; }
+  return deballer(reponse);
 }
 
 // --- Imprimante ----------------------------------------------------------------
@@ -782,7 +808,7 @@ async function poserModele(modele, garderVue = false, glissement = null) {
     oublierZones();
   }
   etat.modele.nom = etat.chemin.split(/[\\/]/).pop();
-  if (glissement) vue3d.glisserModele(glissement[0], glissement[1]); else vue3d.afficherModele(modele.positions, garderVue);
+  if (glissement) vue3d.glisserModele(glissement[0], glissement[1]); else vue3d.afficherModele(modele.positions, garderVue, modele.normales);
   if (glissement) montrerOndulation();
   vue3d.rafraichirTheme();
   $('accueil').hidden = true;
@@ -1936,6 +1962,40 @@ function deplierTrajectoires(ouvert) {
   $('btn-trajectoires').setAttribute('aria-expanded', String(ouvert));
 }
 
+// Pendant un tranchage : un petit cadre en bas à droite (étape, barre, pour
+// cent) et, en haut à gauche, une vignette du plateau dont le voile gris
+// descend à mesure que le calcul avance. Rien ne couvre la vue.
+function suivreTranchage() {
+  let actif = true, minuterie = 0;
+  const montrer = (pourCent, etape) => {
+    const p = Math.max(0, Math.min(100, Math.round(pourCent)));
+    $('tranchage-barre').value = p;
+    $('tranchage-pour-cent').textContent = `${p} %`;
+    if (etape) $('tranchage-etape').textContent = etape;
+    $('vignette-voile').style.height = `${100 - p}%`;
+    $('barre-progression').value = p;
+  };
+  $('vignette-image').src = vue3d.photographier();
+  montrer(0, 'Préparation');
+  $('tranchage').hidden = false;
+  $('vignette-plateau').hidden = false;
+  $('btn-trancher').disabled = true;
+  const interroger = async () => {
+    const reponse = await appeler('avancement');
+    if (!actif) return;
+    if (reponse.ok) montrer(reponse.pour_cent, reponse.etape);
+    minuterie = setTimeout(interroger, 350);
+  };
+  minuterie = setTimeout(interroger, 250);
+  return { finir() {
+    actif = false;
+    clearTimeout(minuterie);
+    $('tranchage').hidden = true;
+    $('vignette-plateau').hidden = true;
+    $('btn-trancher').disabled = false;
+  } };
+}
+
 async function trancher() {
   if (!etat.modele) return;
   if (etat.page !== 'preparer' && etat.page !== 'apercu') choisirVue('preparer');   // pour voir l'attente
@@ -1951,12 +2011,11 @@ async function trancher() {
     if (branches.length) demande.branches = branches;
   }
   await fileMoteur;
-  occuper('Tranchage et vérification en cours…');
   definirEtat('', 'Tranchage en cours', 'Calcul des trajectoires et vérification.');
-  $('barre-progression').removeAttribute('value');   // barre animée : durée inconnue d'avance
+  const suivi = suivreTranchage();
   await new Promise((suite) => setTimeout(suite, 30));
   const reponse = await demander('trancher', demande);
-  liberer();
+  suivi.finir();
   if (!reponse) { definirEtat('mauvais', 'Tranchage impossible', 'Voir le message en haut de la vue.'); return; }
 
   const resultat = reponse.resultat;

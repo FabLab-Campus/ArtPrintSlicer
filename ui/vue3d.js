@@ -451,6 +451,12 @@ export class Vue3D {
     this.demanderRendu();
   }
 
+  // Une petite image de la vue telle qu'elle est (pour la vignette du plateau).
+  photographier() {
+    this.rendu.render(this.scene, this.camera);
+    try { return this.canvas.toDataURL('image/jpeg', 0.7); } catch { return ''; }
+  }
+
   // Montre que la pièce est sélectionnée (elle prend la couleur de sélection).
   selectionner(choisie) {
     this.selection = choisie;
@@ -463,7 +469,8 @@ export class Vue3D {
   }
 
   // « positions » : 9 nombres par triangle, modèle déjà posé sur le plateau.
-  afficherModele(positions, garderVue = false) {
+  // « normales » : les normales lissées, quand le slicer les a déjà calculées.
+  afficherModele(positions, garderVue = false, normales = null) {
     this.vider(this.modele);
     this.modele.position.set(0, 0, 0);
     this.modele.quaternion.identity();
@@ -471,10 +478,12 @@ export class Vue3D {
     this.selection = false;
     this.viderApercu();
     const geometrie = new THREE.BufferGeometry();
-    geometrie.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    // (Un tableau de nombres déjà compact est pris tel quel, sans copie.)
+    const compact = (nombres) => (nombres instanceof Float32Array ? new THREE.BufferAttribute(nombres, 3) : new THREE.Float32BufferAttribute(nombres, 3));
+    geometrie.setAttribute('position', compact(positions));
     // La pièce est montrée lisse : on ne voit pas les triangles du fichier,
     // seulement ses vraies arêtes (voir « normalesLissees »).
-    geometrie.setAttribute('normal', new THREE.Float32BufferAttribute(normalesLissees(positions), 3));
+    geometrie.setAttribute('normal', compact(normales && normales.length === positions.length ? normales : normalesLissees(positions)));
     geometrie.computeBoundingBox();
     this.boite = positions.length ? geometrie.boundingBox.clone() : null;
     this.modele.add(new THREE.Mesh(geometrie, new THREE.MeshStandardMaterial({

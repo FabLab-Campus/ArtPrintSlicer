@@ -275,6 +275,17 @@ input.interrupteur {
 .dev-saisie { display: flex; gap: var(--e-1); }
 .dev-saisie .champ { flex: 1; min-width: 0; }
 @media (max-width: 900px) { .developpeur-corps { grid-template-columns: 1fr; } .fichier { grid-template-columns: 1fr auto; } .fichier .secondaire { display: none; } }
+/* Suivi du tranchage : un petit cadre en bas à droite, une vignette du plateau en haut à gauche */
+.tranchage { right: var(--e-3); bottom: var(--e-3); width: 260px; padding: var(--e-2) var(--e-3); display: grid; gap: var(--e-1); z-index: 4; }
+.tranchage[hidden], .vignette-plateau[hidden] { display: none; }
+.tranchage-ligne { display: flex; justify-content: space-between; gap: var(--e-2); font-size: var(--t-12); color: var(--c-texte-2); }
+.tranchage-ligne b { color: var(--c-texte); font-weight: var(--g-fort); font-variant-numeric: tabular-nums; }
+.tranchage progress { width: 100%; height: var(--h-jauge); appearance: none; border: 0; background: var(--c-bord); }
+.tranchage progress::-webkit-progress-bar { background: var(--c-bord); }
+.tranchage progress::-webkit-progress-value { background: var(--c-accent); transition: width var(--d-rapide); }
+.vignette-plateau { left: var(--e-3); top: calc(var(--e-3) + var(--h-champ) + var(--e-2)); width: 116px; height: 86px; padding: 0; overflow: hidden; z-index: 4; }
+.vignette-plateau img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vignette-voile { position: absolute; left: 0; right: 0; bottom: 0; height: 100%; background: var(--c-texte-3); opacity: 0.72; transition: height var(--d-rapide); }
 /* Témoin discret d'un calcul en arrière-plan */
 .calcul { width: var(--e-2); height: var(--e-2); border-radius: 50%; background: var(--c-accent); animation: calcul 1s ease-in-out infinite alternate; flex: none; }
 @keyframes calcul { from { opacity: 0.25; } to { opacity: 1; } }

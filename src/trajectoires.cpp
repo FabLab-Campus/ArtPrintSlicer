@@ -2,11 +2,13 @@
 #include "trajectoires.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <map>
 #include <unordered_map>
 
+#include "avancement.hpp"
 #include "parallele.hpp"
 
 #include "geometrie.hpp"
@@ -751,7 +753,14 @@ std::vector<CoucheTrajectoires> calculer_trajectoires(const std::vector<Polygone
         }
         filet();
     };
-    en_parallele(contours.size(), traiter);
+    std::atomic<std::size_t> faites{0};
+    en_parallele(contours.size(), [&](std::size_t c) {
+        traiter(c);
+        const std::size_t n = faites.fetch_add(1) + 1;
+        if (n % 8 == 0 || n == contours.size()) {
+            avancement::noter(avancement::Etape::trajectoires, static_cast<double>(n) / static_cast<double>(contours.size()));
+        }
+    });
     return couches;
 }
 
