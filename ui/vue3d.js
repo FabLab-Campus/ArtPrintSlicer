@@ -329,7 +329,7 @@ export class Vue3D {
     const centre = new THREE.Vector3(((nombre - 1) / 2 - this.plateauActif) * pas, 0, 20);
     const d = (this.rayon * 2.3 + (nombre - 1) * pas * 0.62) * 1.5;
     this.controles.target.copy(centre);
-    this.camera.position.set(centre.x, centre.y - 0.84 * d, centre.z + 0.54 * d);
+    this.camera.position.set(centre.x + 0.42 * d, centre.y - 0.76 * d, centre.z + 0.5 * d);
     this.controles.update();
     this.demanderRendu();
   }
@@ -498,7 +498,7 @@ export class Vue3D {
     }
     const d = portee * 2.6;
     const directions = {
-      iso: [0.0, -0.84, 0.54],   // de face, un peu au-dessus : le nom du logiciel est devant nous
+      iso: [0.42, -0.76, 0.5],   // de face, un peu de trois quarts : le nom du logiciel est devant nous
       dessus: [0, -0.0005, 1],
       face: [0, -1, 0.0005],
       droite: [1, 0, 0.0005],

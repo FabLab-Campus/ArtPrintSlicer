@@ -368,9 +368,10 @@ input.interrupteur {
 .barre-outils .separateur { width: var(--trait); height: var(--i-20); background: var(--c-bord); margin: 0 var(--e-2); flex: none; }
 .points-de-vue { left: var(--e-3); bottom: var(--e-3); display: flex; }
 /* Le repère des axes, au-dessus des points de vue */
-.repere { position: absolute; left: var(--e-3); bottom: calc(var(--e-3) + var(--h-champ) + var(--e-2)); width: 132px; height: 132px; pointer-events: none; overflow: visible; }
+.repere { position: absolute; left: var(--e-3); bottom: calc(var(--e-3) + var(--h-champ) + var(--e-2)); width: 156px; height: 156px; pointer-events: none; overflow: visible; }
 .vue.apercu .repere { bottom: calc(var(--e-3) + var(--h-ligne) + var(--e-5) + var(--h-champ) + var(--e-2)); }
 .repere polyline { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.repere polyline.rotation { stroke-width: 1.6; }
 .repere text { font-size: 11px; font-weight: var(--g-fort); text-anchor: middle; dominant-baseline: central; paint-order: stroke; stroke: var(--c-fenetre); stroke-width: 3px; }
 /* Panneaux d'outils : une rangée de champs par axe */
 .rangee-deux { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--e-2); }

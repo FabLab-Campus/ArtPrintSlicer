@@ -208,7 +208,11 @@ function ouvrirMachine() {
         champ.addEventListener('change', async () => {
           const reponse = await demander('definir_reglages', { valeurs: { [cle]: champ.value } });
           if (!reponse) return;
-          if (reponse.refus[cle]) refus[cle] = reponse.refus[cle]; else delete refus[cle];
+          if (reponse.refus[cle]) refus[cle] = reponse.refus[cle]; else {
+            delete refus[cle];
+            // Retenu pour les prochains lancements (le slicer repart de ses valeurs d'origine à chaque fois).
+            memoire.ecrire('reglages-machine', { ...memoire.lire('reglages-machine', {}), [cle]: champ.value });
+          }
           etat.moteur = reponse.reglages;
           afficherImprimante();
           perimer();
@@ -1409,11 +1413,11 @@ function dessinerRepere() {
   if (!svg || !vue3d.versEcran) return;
   const NS = 'http://www.w3.org/2000/svg';
   const L = 30;   // longueur d'un axe, en unités du dessin
-  const trait = (points, couleur, pointille) => {
+  const trait = (points, couleur, classe) => {
     const ligne = document.createElementNS(NS, 'polyline');
     ligne.setAttribute('points', points.map(([x, y]) => `${(x * L).toFixed(1)},${(-y * L).toFixed(1)}`).join(' '));
     ligne.setAttribute('stroke', couleur);
-    if (pointille) ligne.setAttribute('stroke-dasharray', '2 2');
+    if (classe) ligne.setAttribute('class', classe);
     return ligne;
   };
   const lettre = (texte, [x, y], couleur) => {
@@ -1424,48 +1428,44 @@ function dessinerRepere() {
     t.textContent = texte;
     return t;
   };
+  // Une flèche au bout d'une ligne (les deux derniers points donnent son sens).
+  const pointe = (avant, fin, couleur) => {
+    const dx = fin[0] - avant[0], dy = fin[1] - avant[1], n = Math.hypot(dx, dy) || 1;
+    return trait([[fin[0] - 0.2 * (dx / n) - 0.1 * (dy / n), fin[1] - 0.2 * (dy / n) + 0.1 * (dx / n)], fin,
+      [fin[0] - 0.2 * (dx / n) + 0.1 * (dy / n), fin[1] - 0.2 * (dy / n) - 0.1 * (dx / n)]], couleur);
+  };
   const morceaux = [];   // [profondeur, élément] : le plus loin est dessiné d'abord
-  const axes = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  // Les trois axes de la machine, chacun dessiné du côté où on le voit le mieux :
+  // X (gauche-droite) vers la droite, Y (avant-arrière) vers l'avant, Z (haut-bas) vers le haut.
+  const axes = [[1, 0, 0], [0, -1, 0], [0, 0, 1]];
   axes.forEach((axe, i) => {
     const bout = vue3d.versEcran(...axe);
     morceaux.push([bout[2] / 2, trait([[0, 0], bout], COULEURS_AXES[i])]);
-    let place = [bout[0] * 1.28, bout[1] * 1.28];
-    if (i === 1) {
-      // Vue de face, Y part droit vers le fond, derrière Z : sa lettre est décalée pour rester lisible.
-      const z = vue3d.versEcran(0, 0, 1);
-      if (Math.hypot(place[0] - z[0] * 1.28, place[1] - z[1] * 1.28) < 0.45) place = [place[0] + 0.42, place[1] - 0.12];
-    }
-    morceaux.push([bout[2], lettre('XYZ'[i], place, COULEURS_AXES[i])]);
+    morceaux.push([bout[2] / 2, pointe([0, 0], bout, COULEURS_AXES[i])]);
+    morceaux.push([bout[2], lettre('XYZ'[i], [bout[0] * 1.3, bout[1] * 1.3], COULEURS_AXES[i])]);
   });
   if (etat.strategie === 'couches_courbes' && etat.modele) {
-    // C : le plateau tourne autour de Z. B : la tête s'incline autour de son pivot (X ou Y, d'après les réglages).
+    // Les deux rotations : C, le plateau tourne autour de Z ; B, la tête pivote autour de son axe (Y, ou X selon les réglages).
     const pivotX = String(moteur('axe_pivot_b')).toUpperCase() === 'X';
     const arc = (point, de, vers) => Array.from({ length: 25 }, (_, k) => vue3d.versEcran(...point((de + (vers - de) * k / 24) * Math.PI / 180)));
     const arcs = [
-      ['C', arc((t) => [0.62 * Math.cos(t), 0.62 * Math.sin(t), 0.72], 20, 300), COULEURS_AXES[2]],
-      // (L'arc de B est dessiné du côté de l'axe qui vient vers nous, pour qu'il se voie bien.)
-      ['B', arc((t) => (pivotX ? [0.72, 0.5 * Math.sin(t), 0.5 * Math.cos(t)] : [0.5 * Math.sin(t), -0.72, 0.5 * Math.cos(t)]), -75, 75),
+      ['C', arc((t) => [0.36 * Math.cos(t), 0.36 * Math.sin(t), 0.6], 30, 320), COULEURS_AXES[2]],
+      ['B', arc((t) => (pivotX ? [0.6, 0.36 * Math.sin(t), 0.36 * Math.cos(t)] : [0.36 * Math.sin(t), -0.6, 0.36 * Math.cos(t)]), -150, 150),
         COULEURS_AXES[pivotX ? 0 : 1]]];
-    if (!pivotX) {
-      // L'axe Y prolongé vers l'avant, en pointillé : c'est autour de lui que la tête s'incline.
-      const avant = vue3d.versEcran(0, -1, 0);
-      morceaux.push([avant[2] / 2, trait([[0, 0], avant], COULEURS_AXES[1], true)]);
-    }
     for (const [nom, points, couleur] of arcs) {
       const profondeur = points.reduce((somme, q) => somme + q[2], 0) / points.length;
-      morceaux.push([profondeur, trait(points, couleur, true)]);
+      morceaux.push([profondeur, trait(points, couleur, 'rotation')]);
+      morceaux.push([profondeur, pointe(points[points.length - 4], points[points.length - 1], couleur)]);
       const fin = points[points.length - 1], avant = points[points.length - 4];
       const dx = fin[0] - avant[0], dy = fin[1] - avant[1], n = Math.hypot(dx, dy) || 1;
-      // (La pointe de la flèche, au bout de l'arc.)
-      morceaux.push([profondeur, trait([[fin[0] - 0.16 * (dx / n) - 0.09 * (dy / n), fin[1] - 0.16 * (dy / n) + 0.09 * (dx / n)], fin,
-        [fin[0] - 0.16 * (dx / n) + 0.09 * (dy / n), fin[1] - 0.16 * (dy / n) - 0.09 * (dx / n)]], couleur)]);
-      morceaux.push([profondeur + 0.01, lettre(nom, [fin[0] + 0.2 * (dx / n), fin[1] + 0.2 * (dy / n)], couleur)]);
+      morceaux.push([profondeur + 0.01, lettre(nom, [fin[0] + 0.26 * (dx / n), fin[1] + 0.26 * (dy / n)], couleur)]);
     }
   }
   morceaux.sort((p, q) => p[0] - q[0]);
   svg.replaceChildren(...morceaux.map((m) => m[1]));
   svg.setAttribute('aria-label', etat.strategie === 'couches_courbes' && etat.modele
-    ? 'Repère des axes X, Y, Z et des rotations B (tête) et C (plateau)' : 'Repère des axes X, Y, Z');
+    ? 'Axes X (gauche-droite), Y (avant-arrière), Z (haut-bas), rotations B (pivot de la tête) et C (plateau)'
+    : 'Axes X (gauche-droite), Y (avant-arrière), Z (haut-bas)');
 }
 vue3d.surVue = dessinerRepere;
 
@@ -2361,14 +2361,22 @@ for (const nom of ['iso', 'dessus', 'face', 'droite', 'cadrer']) {
   if (infos) $('version').textContent = infos.version;
   let reponse = await demander('reglages');
   if (reponse) etat.moteur = reponse.reglages;
-  // Les mesures de la machine (profil « ArtPrint 5 axes ») sont posées une
-  // fois, si elles ne sont pas déjà renseignées ; elles restent modifiables.
-  const manquants = Object.fromEntries(Object.entries(PROFIL_MACHINE.reglages)
-    .filter(([cle]) => memoire.lire('profil-machine', '') !== PROFIL_MACHINE.version && etat.moteur.some((r) => r.cle === cle)));
-  if (Object.keys(manquants).length) {
-    reponse = await demander('definir_reglages', { valeurs: manquants });
-    if (reponse) etat.moteur = reponse.reglages;
+  // Les mesures de la machine. Le slicer repart de ses valeurs d'origine à
+  // chaque lancement : le profil « ArtPrint 5 axes » est donc reposé à chaque
+  // fois, puis ce que l'utilisateur a changé lui-même dans la fiche de la
+  // machine. Un nouveau profil (autre « version ») reprend la main, une fois,
+  // sur les réglages qu'il contient.
+  let personnels = memoire.lire('reglages-machine', {});
+  if (memoire.lire('profil-machine', '') !== PROFIL_MACHINE.version) {
+    personnels = Object.fromEntries(Object.entries(personnels).filter(([cle]) => !(cle in PROFIL_MACHINE.reglages)));
+    memoire.ecrire('reglages-machine', personnels);
     memoire.ecrire('profil-machine', PROFIL_MACHINE.version);
+  }
+  const machine = Object.fromEntries(Object.entries({ ...PROFIL_MACHINE.reglages, ...personnels })
+    .filter(([cle]) => etat.moteur.some((r) => r.cle === cle)));
+  if (Object.keys(machine).length) {
+    reponse = await demander('definir_reglages', { valeurs: machine });
+    if (reponse) etat.moteur = reponse.reglages;
   }
   await synchroniser(PARAMETRES);
   await monterBobine(etat.montee, true);
